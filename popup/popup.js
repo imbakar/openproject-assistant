@@ -805,7 +805,7 @@ async function loadTasks() {
 
   try {
     // Build filters - always filter by assignee = me
-    let filterArray = [{ assignee_id: { operator: '=', values: ['me'] } }];
+    let filterArray = [{ assignee: { operator: '=', values: ['me'] } }];
 
     if (statusFilter) {
       // Map status filter values to OpenProject status IDs
