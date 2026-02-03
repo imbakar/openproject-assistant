@@ -268,13 +268,32 @@ async function loadSettings() {
 
 // Check connection to OpenProject
 async function checkConnection() {
+  const { lastConnectionCheck } = await chrome.storage.local.get([
+    'lastConnectionCheck',
+  ]);
+
+  const oneHour = 60 * 60 * 1000;
+  const now = Date.now();
+
+  // If we have a successful connection check from the last hour, use it
+  if (lastConnectionCheck && now - lastConnectionCheck < oneHour) {
+    // showStatus('Connected to OpenProject', 'success');
+    const statusEl = document.getElementById('connectionStatus');
+    statusEl.style.display = 'none';
+    return true;
+  }
+
   try {
     const response = await makeApiCall('/api/v3');
     if (response) {
+      await chrome.storage.local.set({
+        lastConnectionCheck: now,
+      });
       showStatus('Connected to OpenProject', 'success');
       return true;
     }
   } catch (error) {
+    // If connection fails, we don't store anything so it will retry next time
     showStatus('Not connected. Please configure settings.', 'error');
     return false;
   }
