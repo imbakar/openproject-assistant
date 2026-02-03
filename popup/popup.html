@@ -15,20 +15,20 @@
         <button id="refreshBtn" class="icon-btn" title="Refresh">🔄</button>
       </div>
     </header>
-    
+
     <nav class="tabs">
       <button class="tab-btn active" data-tab="worklog">Worklog</button>
       <button class="tab-btn" data-tab="timer">Timer</button>
       <button class="tab-btn" data-tab="reports">Reports</button>
       <button class="tab-btn" data-tab="tasks">Tasks</button>
     </nav>
-    
+
     <!-- Worklog Tab -->
     <div id="worklog" class="tab-content active">
       <div class="section">
         <h2>Log Work</h2>
         <div id="connectionStatus" class="status-indicator"></div>
-        
+
         <div class="form-group">
           <label for="workPackageSelect">Work Package</label>
           <div class="searchable-select-wrapper">
@@ -37,40 +37,39 @@
               <option value="">Loading work packages...</option>
             </select>
           </div>
-          <small>Click to expand, type to filter</small>
         </div>
-        
+
         <div class="form-group">
           <label for="workDate">Date</label>
           <input type="date" id="workDate" />
         </div>
-        
+
         <div class="time-input-group">
           <div class="form-group half-width">
             <label for="workStartTime">Start Time (Optional)</label>
             <input type="time" id="workStartTime" />
           </div>
-          
+
           <div class="form-group half-width">
             <label for="workEndTime">End Time (Optional)</label>
             <input type="time" id="workEndTime" />
           </div>
         </div>
-        
+
         <div class="form-group">
           <label for="workHours">Hours</label>
           <input type="number" id="workHours" min="0" max="24" step="0.25" placeholder="Hours spent (or use time range above)" />
           <small>Enter hours manually or use start/end time above</small>
         </div>
-        
+
         <div class="form-group">
           <label for="workComment">Comment</label>
           <textarea id="workComment" rows="3" placeholder="Describe the work done..."></textarea>
         </div>
-        
+
         <button id="logWorkBtn" class="btn btn-primary">Log Work</button>
       </div>
-      
+
       <div class="section">
         <h2>Recent Worklogs</h2>
         <div id="recentWorklogsContainer">
@@ -78,16 +77,16 @@
         </div>
       </div>
     </div>
-    
+
     <!-- Timer Tab -->
     <div id="timer" class="tab-content">
       <div class="section">
         <h2>Time Tracker</h2>
-        
+
         <div class="timer-display">
           <div id="timerTime" class="timer-time">00:00:00</div>
         </div>
-        
+
         <div class="form-group">
           <label for="timerWorkPackage">Work Package</label>
           <div class="searchable-select-wrapper">
@@ -96,14 +95,13 @@
               <option value="">Select work package...</option>
             </select>
           </div>
-          <small>Click to expand, type to filter</small>
         </div>
-        
+
         <div class="form-group">
           <label for="timerComment">What are you working on?</label>
           <textarea id="timerComment" rows="2" placeholder="Task description..."></textarea>
         </div>
-        
+
         <div class="timer-controls">
           <button id="startTimerBtn" class="btn btn-success">Start</button>
           <button id="pauseTimerBtn" class="btn btn-warning" disabled>Pause</button>
@@ -112,12 +110,12 @@
         </div>
       </div>
     </div>
-    
+
     <!-- Reports Tab -->
     <div id="reports" class="tab-content">
       <div class="section">
         <h2>Generate Reports</h2>
-        
+
         <div class="form-group">
           <label for="reportType">Report Type</label>
           <select id="reportType">
@@ -127,32 +125,32 @@
             <option value="weekly">Weekly Report</option>
           </select>
         </div>
-        
+
         <div class="form-group">
           <label for="reportStartDate">Start Date</label>
           <input type="date" id="reportStartDate" />
         </div>
-        
+
         <div class="form-group">
           <label for="reportEndDate">End Date</label>
           <input type="date" id="reportEndDate" />
         </div>
-        
+
         <button id="generateReportBtn" class="btn btn-primary">Generate Report</button>
         <button id="exportReportBtn" class="btn btn-secondary" disabled>Export CSV</button>
       </div>
-      
+
       <div id="reportResults" class="section" style="display: none;">
         <h2>Report Results</h2>
         <div id="reportContent"></div>
       </div>
     </div>
-    
+
     <!-- Tasks Tab -->
     <div id="tasks" class="tab-content">
       <div class="section">
         <h2>My Work Packages</h2>
-        
+
         <div class="filters">
           <select id="taskStatusFilter">
             <option value="">All Statuses</option>
@@ -160,23 +158,23 @@
             <option value="in-progress">In Progress</option>
             <option value="resolved">Resolved</option>
           </select>
-          
+
           <select id="taskProjectFilter">
             <option value="">All Projects</option>
           </select>
         </div>
-        
+
         <div id="tasksList">
           <p class="loading">Loading tasks...</p>
         </div>
       </div>
     </div>
-    
+
     <footer>
       <p class="footer-text">OpenProject Assistant v1.0.0</p>
     </footer>
   </div>
-  
+
   <script src="popup.js"></script>
 </body>
 </html>
