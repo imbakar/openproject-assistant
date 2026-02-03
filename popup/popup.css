@@ -203,6 +203,38 @@ header h1 {
   flex: 1;
 }
 
+/* Mode Toggle */
+.mode-toggle {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.mode-btn {
+  flex: 1;
+  padding: 8px 16px;
+  border: 1px solid #ced4da;
+  background: #f8f9fa;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  color: #495057;
+}
+
+.mode-btn:hover {
+  background: #e9ecef;
+  border-color: #adb5bd;
+}
+
+.mode-btn.active {
+  background: #667eea;
+  color: white;
+  border-color: #667eea;
+}
+
+
 /* Buttons */
 .btn {
   padding: 10px 16px;

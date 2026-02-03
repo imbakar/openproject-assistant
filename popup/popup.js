@@ -11,6 +11,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupEventListeners();
   setDefaultDates();
   loadWorkPackages();
+  loadProjects();
   loadRecentWorklogs();
   loadTasks();
   loadTimerState();
@@ -31,6 +32,7 @@ function setupEventListeners() {
   // Refresh button
   document.getElementById('refreshBtn').addEventListener('click', async () => {
     await loadWorkPackages();
+    await loadProjects();
     await loadRecentWorklogs();
     await loadTasks();
     showStatus('Data refreshed', 'success');
@@ -126,6 +128,49 @@ function setupEventListeners() {
     });
   }
 
+  // Project search (same functionality)
+  const projectSearchInput = document.getElementById('projectSearchInput');
+  const projectSelectElement = document.getElementById('projectSelect');
+
+  if (projectSearchInput && projectSelectElement) {
+    projectSearchInput.addEventListener('focus', () => {
+      projectSelectElement.classList.add('show');
+      adjustSelectHeight(projectSelectElement);
+    });
+
+    projectSearchInput.addEventListener('input', (e) => {
+      filterProjectOptions(e.target.value);
+      projectSelectElement.classList.add('show');
+      adjustSelectHeight(projectSelectElement);
+    });
+
+    projectSelectElement.addEventListener('change', () => {
+      const selectedOption =
+        projectSelectElement.options[projectSelectElement.selectedIndex];
+      if (selectedOption && selectedOption.value) {
+        projectSearchInput.value = selectedOption.textContent;
+        projectSelectElement.classList.remove('show');
+      }
+    });
+
+    projectSelectElement.addEventListener('click', (e) => {
+      if (e.target.tagName === 'OPTION' && e.target.value) {
+        projectSearchInput.value = e.target.textContent;
+        projectSelectElement.value = e.target.value;
+        projectSelectElement.classList.remove('show');
+      }
+    });
+
+    document.addEventListener('click', (e) => {
+      if (
+        !projectSearchInput.contains(e.target) &&
+        !projectSelectElement.contains(e.target)
+      ) {
+        projectSelectElement.classList.remove('show');
+      }
+    });
+  }
+
   // Time range inputs - auto-calculate hours
   const startTimeInput = document.getElementById('workStartTime');
   const endTimeInput = document.getElementById('workEndTime');
@@ -150,6 +195,14 @@ function setupEventListeners() {
     startTimeInput.addEventListener('change', calculateHours);
     endTimeInput.addEventListener('change', calculateHours);
   }
+
+  // Mode toggle buttons
+  document.getElementById('existingModeBtn').addEventListener('click', () => {
+    switchWorkPackageMode('existing');
+  });
+  document.getElementById('newModBtn').addEventListener('click', () => {
+    switchWorkPackageMode('new');
+  });
 
   // Log work button
   document.getElementById('logWorkBtn').addEventListener('click', logWork);
@@ -255,6 +308,115 @@ async function makeApiCall(endpoint, method = 'GET', data = null) {
   });
 }
 
+// Switch between selecting existing work packages and creating new ones
+function switchWorkPackageMode(mode) {
+  const existingBtn = document.getElementById('existingModeBtn');
+  const newBtn = document.getElementById('newModBtn');
+  const existingSection = document.getElementById('existingWorkPackageSection');
+  const newSection = document.getElementById('newWorkPackageSection');
+
+  if (mode === 'existing') {
+    existingBtn.classList.add('active');
+    newBtn.classList.remove('active');
+    existingSection.style.display = 'block';
+    newSection.style.display = 'none';
+  } else {
+    // Switching to "Create New" mode
+    existingBtn.classList.remove('active');
+    newBtn.classList.add('active');
+    existingSection.style.display = 'none';
+    newSection.style.display = 'block';
+
+    // Cancel edit mode if active
+    if (window.editingWorklogId) {
+      delete window.editingWorklogId;
+      delete window.editingWorklogWPId;
+      const logBtn = document.getElementById('logWorkBtn');
+      logBtn.textContent = 'Log Work';
+      logBtn.classList.remove('btn-warning');
+      logBtn.classList.add('btn-primary');
+      showStatus('Edit cancelled - switched to create new mode', 'info');
+    }
+  }
+}
+
+// Load projects for project selector
+async function loadProjects() {
+  try {
+    const response = await makeApiCall('/api/v3/projects?pageSize=100');
+    const projects = response._embedded?.elements || [];
+
+    // Store globally for filtering
+    window.allProjects = projects;
+
+    updateProjectSelect(projects);
+
+    // Also load work package types
+    await loadWorkPackageTypes();
+  } catch (error) {
+    console.error('Error loading projects:', error);
+    showStatus('Failed to load projects', 'error');
+  }
+}
+
+// Update project select dropdown
+function updateProjectSelect(projects) {
+  const projectSelect = document.getElementById('projectSelect');
+  const currentValue = projectSelect.value;
+  projectSelect.innerHTML = '';
+
+  projects.forEach((project) => {
+    const option = document.createElement('option');
+    option.value = project.id;
+    option.textContent = project.name;
+    projectSelect.appendChild(option);
+  });
+
+  // Restore previous selection if still available
+  if (currentValue) {
+    projectSelect.value = currentValue;
+  }
+
+  adjustSelectHeight(projectSelect, 100, 100);
+}
+
+// Filter project options based on search
+function filterProjectOptions(query) {
+  if (!window.allProjects) return;
+
+  const filtered = window.allProjects.filter((project) => {
+    if (!query) return true;
+
+    const lowerQuery = query.toLowerCase();
+    const id = project.id.toString();
+    const name = project.name.toLowerCase();
+
+    return id.includes(lowerQuery) || name.includes(lowerQuery);
+  });
+
+  updateProjectSelect(filtered);
+}
+
+// Load work package types
+async function loadWorkPackageTypes() {
+  try {
+    const response = await makeApiCall('/api/v3/types?pageSize=100');
+    const types = response._embedded?.elements || [];
+
+    const typeSelect = document.getElementById('taskType');
+    typeSelect.innerHTML = '';
+
+    types.forEach((type) => {
+      const option = document.createElement('option');
+      option.value = type.id;
+      option.textContent = type.name;
+      typeSelect.appendChild(option);
+    });
+  } catch (error) {
+    console.error('Error loading work package types:', error);
+  }
+}
+
 // Load work packages
 async function loadWorkPackages() {
   try {
@@ -351,11 +513,9 @@ function updateTimerWorkPackageSelect(workPackages) {
 }
 
 // Adjust select height dynamically based on number of options
-function adjustSelectHeight(selectElement) {
+function adjustSelectHeight(selectElement, minHeight = 100, maxHeight = 180) {
   const optionCount = selectElement.options.length;
   const itemHeight = 40; // Approximate height per option
-  const minHeight = 100;
-  const maxHeight = 180;
 
   let calculatedHeight = optionCount * itemHeight;
   calculatedHeight = Math.max(minHeight, Math.min(maxHeight, calculatedHeight));
@@ -438,7 +598,7 @@ async function loadRecentWorklogs() {
         const commentEscaped = escapeHtml(wl.comment?.raw || '');
 
         return `
-        <div class="worklog-item" data-id="${wl.id}" data-wp-id="${wpId}" data-date="${wl.spentOn}" data-hours="${hours}" data-comment="${commentEscaped}">
+        <div class="worklog-item" data-id="${wl.id}" data-wp-id="${wpId}" data-wp-title="${escapeHtml(wpTitle)}" data-date="${wl.spentOn}" data-hours="${hours}" data-comment="${commentEscaped}">
           <div class="worklog-header">
             <a href="${wpUrl}" target="_blank" class="worklog-title" title="Open in OpenProject">
               #${wpId} - ${escapeHtml(wpTitle)}
@@ -498,28 +658,53 @@ function formatHoursAsHHMM(hours) {
 function editWorklog(worklogItem) {
   const id = worklogItem.dataset.id;
   const wpId = worklogItem.dataset.wpId;
+  const wpTitle = worklogItem.dataset.wpTitle;
   const date = worklogItem.dataset.date;
   const hours = parseFloat(worklogItem.dataset.hours);
   const comment = worklogItem.dataset.comment;
 
+  // Store the IDs for updating
+  window.editingWorklogId = id;
+  window.editingWorklogWPId = wpId;
+
+  // Switch to existing mode (cannot create new when editing)
+  switchWorkPackageMode('existing');
+
+  // Ensure the work package exists in our global list so it doesn't disappear on filter
+  if (window.allWorkPackages) {
+    const exists = window.allWorkPackages.find(
+      (wp) => wp.id.toString() === wpId
+    );
+    if (!exists) {
+      window.allWorkPackages.push({
+        id: parseInt(wpId),
+        subject: wpTitle,
+        _links: { project: { title: '' } },
+      });
+    }
+  }
+
+  // Update the select options
+  updateWorkPackageSelects(window.allWorkPackages || []);
+
   // Pre-fill form with existing data
-  document.getElementById('workPackageSelect').value = wpId;
+  const select = document.getElementById('workPackageSelect');
+  select.value = wpId;
 
   // Update search input to show selected work package
-  const selectedOption = document.querySelector(
-    `#workPackageSelect option[value="${wpId}"]`
-  );
+  const selectedOption = select.querySelector(`option[value="${wpId}"]`);
   if (selectedOption) {
     document.getElementById('workPackageSearchInput').value =
       selectedOption.textContent;
+  } else {
+    // Fallback if select.value didn't work
+    document.getElementById('workPackageSearchInput').value =
+      `#${wpId} - ${wpTitle}`;
   }
 
   document.getElementById('workDate').value = date;
   document.getElementById('workHours').value = hours.toFixed(2);
   document.getElementById('workComment').value = comment;
-
-  // Store the ID for updating
-  window.editingWorklogId = id;
 
   // Change button text
   const logBtn = document.getElementById('logWorkBtn');
@@ -551,7 +736,75 @@ async function deleteWorklog(id) {
 
 // Log work
 async function logWork() {
-  const workPackageId = document.getElementById('workPackageSelect').value;
+  // Check which mode is active
+  const isNewMode = document
+    .getElementById('newModBtn')
+    .classList.contains('active');
+
+  let workPackageId;
+
+  // Cannot create new work package when editing existing worklog
+  if (isNewMode && window.editingWorklogId) {
+    showStatus(
+      'Cannot create new work package while editing. Please use existing work package or cancel edit.',
+      'warning'
+    );
+    return;
+  }
+
+  if (isNewMode) {
+    // Create new work package mode
+    const projectId = document.getElementById('projectSelect').value;
+    const taskTitle = document.getElementById('taskTitle').value;
+    const taskType = document.getElementById('taskType').value;
+
+    if (!projectId || !taskTitle) {
+      showStatus('Please select a project and enter a task title', 'warning');
+      return;
+    }
+
+    try {
+      // Create new work package
+      showStatus('Creating new work package...', 'info');
+      const wpData = {
+        subject: taskTitle,
+        _links: {
+          type: {
+            href: `/api/v3/types/${taskType}`,
+          },
+          project: {
+            href: `/api/v3/projects/${projectId}`,
+          },
+        },
+      };
+
+      const newWP = await makeApiCall('/api/v3/work_packages', 'POST', wpData);
+      workPackageId = newWP.id;
+      showStatus('Work package created successfully!', 'success');
+    } catch (error) {
+      console.error('Error creating work package:', error);
+      showStatus('Failed to create work package: ' + error.message, 'error');
+      return;
+    }
+  } else {
+    // Existing work package mode
+    workPackageId = document.getElementById('workPackageSelect').value;
+
+    // Use fallback if editing and select is empty
+    if (
+      !workPackageId &&
+      window.editingWorklogId &&
+      window.editingWorklogWPId
+    ) {
+      workPackageId = window.editingWorklogWPId;
+    }
+
+    if (!workPackageId) {
+      showStatus('Please select a work package', 'warning');
+      return;
+    }
+  }
+
   const date = document.getElementById('workDate').value;
   const startTime = document.getElementById('workStartTime')?.value;
   const endTime = document.getElementById('workEndTime')?.value;
@@ -573,11 +826,8 @@ async function logWork() {
     document.getElementById('workHours').value = hours.toFixed(2);
   }
 
-  if (!workPackageId || !hours || hours <= 0) {
-    showStatus(
-      'Please select a work package and enter hours or time range',
-      'warning'
-    );
+  if (!hours || hours <= 0) {
+    showStatus('Please enter hours or time range', 'warning');
     return;
   }
 
@@ -610,6 +860,7 @@ async function logWork() {
 
       // Reset editing state
       delete window.editingWorklogId;
+      delete window.editingWorklogWPId;
       const logBtn = document.getElementById('logWorkBtn');
       logBtn.textContent = 'Log Work';
       logBtn.classList.remove('btn-warning');
@@ -627,9 +878,15 @@ async function logWork() {
     }
     document.getElementById('workComment').value = '';
     document.getElementById('workPackageSearchInput').value = '';
+    document.getElementById('taskTitle').value = '';
+    document.getElementById('projectSearchInput').value = '';
 
-    // Reload worklogs
+    // Reset to existing mode
+    switchWorkPackageMode('existing');
+
+    // Reload data
     await loadRecentWorklogs();
+    await loadWorkPackages(); // Reload to include the new work package
   } catch (error) {
     console.error('Error logging work:', error);
     showStatus('Failed to log work: ' + error.message, 'error');
