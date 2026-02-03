@@ -105,7 +105,18 @@ async function makeApiCall(endpoint, method = 'GET', data = null) {
     throw new Error(`API Error: ${response.status} - ${errorText}`);
   }
 
-  return await response.json();
+  // Handle empty responses (e.g., DELETE requests return 204 No Content)
+  if (response.status === 204) {
+    return {};
+  }
+
+  // Try to parse JSON, but handle empty responses gracefully
+  const text = await response.text();
+  if (!text || text.trim() === '') {
+    return {};
+  }
+
+  return JSON.parse(text);
 }
 
 // Export functions for testing
