@@ -1167,11 +1167,8 @@ function startTimer() {
         if (!timerInterval) {
           timerInterval = setInterval(refreshTimerFromBackground, 1000);
         }
-        document.getElementById('startTimerBtn').disabled = true;
-        document.getElementById('pauseTimerBtn').disabled = false;
-        document.getElementById('stopTimerBtn').disabled = false;
-        document.getElementById('pauseTimerBtn').textContent = 'Pause';
         isPaused = false;
+        updateTimerButtons(true, timerSeconds, isPaused);
       }
     }
   );
@@ -1187,9 +1184,7 @@ function pauseTimer() {
     (response) => {
       if (response.success) {
         isPaused = !isPaused;
-        document.getElementById('pauseTimerBtn').textContent = isPaused
-          ? 'Resume'
-          : 'Pause';
+        updateTimerButtons(!isPaused, timerSeconds, isPaused);
       }
     }
   );
@@ -1201,10 +1196,10 @@ function refreshTimerFromBackground() {
     updateTimerDisplay();
 
     // Sync button states if they changed in background
-    if (!state.isRunning && !isPaused && timerSeconds > 0) {
-      isPaused = true;
-      document.getElementById('pauseTimerBtn').textContent = 'Resume';
-      document.getElementById('startTimerBtn').disabled = false;
+    const backgroundIsPaused = !state.isRunning && timerSeconds > 0;
+    if (state.isRunning !== !isPaused || backgroundIsPaused !== isPaused) {
+      isPaused = backgroundIsPaused;
+      updateTimerButtons(state.isRunning, timerSeconds, isPaused);
     }
   });
 }
@@ -1289,11 +1284,7 @@ function resetTimerUI() {
   timerSeconds = 0;
   isPaused = false;
   updateTimerDisplay();
-
-  document.getElementById('startTimerBtn').disabled = false;
-  document.getElementById('pauseTimerBtn').disabled = true;
-  document.getElementById('pauseTimerBtn').textContent = 'Pause';
-  document.getElementById('stopTimerBtn').disabled = true;
+  updateTimerButtons(false, 0, false);
 }
 
 function updateTimerDisplay() {
@@ -1326,20 +1317,10 @@ function loadTimerState() {
     isPaused = !state.isRunning && timerSeconds > 0;
 
     updateTimerDisplay();
+    updateTimerButtons(state.isRunning, timerSeconds, isPaused);
 
-    if (state.isRunning) {
-      if (!timerInterval) {
-        timerInterval = setInterval(refreshTimerFromBackground, 1000);
-      }
-      document.getElementById('startTimerBtn').disabled = true;
-      document.getElementById('pauseTimerBtn').disabled = false;
-      document.getElementById('stopTimerBtn').disabled = false;
-      document.getElementById('pauseTimerBtn').textContent = 'Pause';
-    } else if (isPaused) {
-      document.getElementById('startTimerBtn').disabled = false;
-      document.getElementById('pauseTimerBtn').disabled = false;
-      document.getElementById('stopTimerBtn').disabled = false;
-      document.getElementById('pauseTimerBtn').textContent = 'Resume';
+    if (state.isRunning && !timerInterval) {
+      timerInterval = setInterval(refreshTimerFromBackground, 1000);
     }
 
     if (state.workPackageId) {
@@ -1368,6 +1349,41 @@ function syncTimerWPSelection(wpId) {
     if (searchInput) {
       searchInput.value = selectedOption.textContent;
     }
+  }
+}
+
+// Update visibility and state of timer control buttons
+function updateTimerButtons(isRunning, seconds, isPausedState) {
+  const startBtn = document.getElementById('startTimerBtn');
+  const pauseBtn = document.getElementById('pauseTimerBtn');
+  const stopBtn = document.getElementById('stopTimerBtn');
+  const resetBtn = document.getElementById('resetTimerBtn');
+
+  if (!startBtn || !pauseBtn || !stopBtn || !resetBtn) return;
+
+  if (isRunning) {
+    startBtn.classList.add('hidden');
+    pauseBtn.classList.remove('hidden');
+    pauseBtn.disabled = false;
+    pauseBtn.textContent = 'Pause';
+    stopBtn.classList.remove('hidden');
+    stopBtn.disabled = false;
+    resetBtn.classList.remove('hidden');
+  } else if (seconds > 0) {
+    // Paused
+    startBtn.classList.add('hidden');
+    pauseBtn.classList.remove('hidden');
+    pauseBtn.disabled = false;
+    pauseBtn.textContent = 'Resume';
+    stopBtn.classList.remove('hidden');
+    stopBtn.disabled = false;
+    resetBtn.classList.remove('hidden');
+  } else {
+    // Idle (0 seconds)
+    startBtn.classList.remove('hidden');
+    pauseBtn.classList.add('hidden');
+    stopBtn.classList.add('hidden');
+    resetBtn.classList.add('hidden');
   }
 }
 
