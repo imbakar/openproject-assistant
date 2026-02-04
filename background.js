@@ -34,7 +34,7 @@ async function checkMissingWorklogs() {
   try {
     // Check if user has logged any work today
     const response = await fetch(
-      `${settings.serverUrl}/api/v3/time_entries?filters=[{"spent_on":{"operator":"=","values":["${today}"]}}]`,
+      `${settings.serverUrl}/api/v3/time_entries?filters=[{"spentOn":{"operator":"<>d","values":["${today}","${today}"]}}]&sortBy=[["spentOn","desc"]]`,
       {
         headers: {
           Authorization: `Basic ${btoa(`apikey:${settings.apiKey}`)}`,

@@ -616,7 +616,7 @@ async function loadRecentWorklogs() {
 
     // Filter by current user (me)
     const response = await makeApiCall(
-      `/api/v3/time_entries?filters=[{"spent_on":{"operator":"<>d","values":["${startDateStr}","${endDate}"]}},{"user_id":{"operator":"=","values":["me"]}}]&sortBy=[["spent_on","desc"]]&pageSize=20`
+      `/api/v3/time_entries?filters=[{"spentOn":{"operator":"<>d","values":["${startDateStr}","${endDate}"]}},{"user_id":{"operator":"=","values":["me"]}}]&sortBy=[["spentOn","desc"]]&pageSize=20`
     );
 
     const worklogs = response._embedded?.elements || [];
@@ -636,10 +636,29 @@ async function loadRecentWorklogs() {
         const wpUrl = wpId
           ? `${settings.serverUrl}/work_packages/${wpId}`
           : '#';
-        const commentEscaped = escapeHtml(wl.comment?.raw || '');
+        const commentRaw = wl.comment?.raw || '';
+        let commentEscaped = escapeHtml(commentRaw);
+
+        let startTime = wl.startTime
+          ? new Date(wl.startTime).toTimeString().slice(0, 5)
+          : '';
+        let endTime = wl.endTime
+          ? new Date(wl.endTime).toTimeString().slice(0, 5)
+          : '';
+
+        // Smart Comment: Try to extract times from comment if they are missing from official fields
+        if (!startTime || !endTime) {
+          const timeMatch = commentRaw.match(
+            /^\((\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})\)\s*(.*)/
+          );
+          if (timeMatch) {
+            startTime = timeMatch[1];
+            endTime = timeMatch[2];
+          }
+        }
 
         return `
-        <div class="worklog-item" data-id="${wl.id}" data-wp-id="${wpId}" data-wp-title="${escapeHtml(wpTitle)}" data-date="${wl.spentOn}" data-hours="${hours}" data-comment="${commentEscaped}">
+        <div class="worklog-item" data-id="${wl.id}" data-wp-id="${wpId}" data-wp-title="${escapeHtml(wpTitle)}" data-date="${wl.spentOn}" data-hours="${hours}" data-comment="${commentEscaped}" data-start-time="${startTime}" data-end-time="${endTime}">
           <div class="worklog-header">
             <a href="${wpUrl}" target="_blank" class="worklog-title" title="Open in OpenProject">
               #${wpId} - ${escapeHtml(wpTitle)}
@@ -715,7 +734,14 @@ function editWorklog(worklogItem) {
   const wpTitle = worklogItem.dataset.wpTitle;
   const date = worklogItem.dataset.date;
   const hours = parseFloat(worklogItem.dataset.hours);
-  const comment = worklogItem.dataset.comment;
+  let comment = worklogItem.dataset.comment;
+  const startTime = worklogItem.dataset.startTime || '';
+  const endTime = worklogItem.dataset.endTime || '';
+
+  // Smart Comment: Strip the time prefix from the comment displayed in the form
+  if (comment) {
+    comment = comment.replace(/^\(\d{2}:\d{2}\s*-\s*\d{2}:\d{2}\)\s*/, '');
+  }
 
   // Store the IDs for updating
   window.editingWorklogId = id;
@@ -759,6 +785,8 @@ function editWorklog(worklogItem) {
   document.getElementById('workDate').value = date;
   document.getElementById('workHours').value = hours.toFixed(2);
   document.getElementById('workComment').value = comment;
+  document.getElementById('workStartTime').value = startTime;
+  document.getElementById('workEndTime').value = endTime;
 
   // Change button text
   const logBtn = document.getElementById('logWorkBtn');
@@ -889,11 +917,23 @@ async function logWork() {
     // Convert hours to ISO 8601 duration format (PT#H#M)
     const duration = convertHoursToISO8601(hours);
 
+    // Smart Comment: Prepend times to the comment so they are stored even if API doesn't support the fields
+    let finalComment = comment || '';
+    if (startTime && endTime) {
+      // Stripping existing prefix if any (though usually it's a new entry or edited)
+      const cleanComment = finalComment.replace(
+        /^\(\d{2}:\d{2}\s*-\s*\d{2}:\d{2}\)\s*/,
+        ''
+      );
+      finalComment = `(${startTime} - ${endTime}) ${cleanComment}`;
+    }
+
     const data = {
+      ongoing: false,
       spentOn: date,
       hours: duration,
       comment: {
-        raw: comment || '',
+        raw: finalComment,
         format: 'plain',
       },
       _links: {
@@ -1479,7 +1519,7 @@ async function generateReport() {
 
   try {
     const response = await makeApiCall(
-      `/api/v3/time_entries?filters=[{"spent_on":{"operator":"<>d","values":["${startDate}","${endDate}"]}}]&pageSize=1000`
+      `/api/v3/time_entries?filters=[{"spentOn":{"operator":"<>d","values":["${startDate}","${endDate}"]}}]&pageSize=1000`
     );
 
     const entries = response._embedded?.elements || [];
