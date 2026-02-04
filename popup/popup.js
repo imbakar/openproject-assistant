@@ -207,6 +207,12 @@ function setupEventListeners() {
   // Log work button
   document.getElementById('logWorkBtn').addEventListener('click', logWork);
 
+  // Reset worklog button
+  document.getElementById('resetWorklogBtn').addEventListener('click', () => {
+    resetWorklogForm();
+    showStatus('Form reset', 'info');
+  });
+
   // Timer controls
   document
     .getElementById('startTimerBtn')
@@ -358,18 +364,10 @@ function switchWorkPackageMode(mode) {
     newBtn.classList.add('active');
     existingSection.style.display = 'none';
     newSection.style.display = 'block';
-
-    // Cancel edit mode if active
-    if (window.editingWorklogId) {
-      delete window.editingWorklogId;
-      delete window.editingWorklogWPId;
-      const logBtn = document.getElementById('logWorkBtn');
-      logBtn.textContent = 'Log Work';
-      logBtn.classList.remove('btn-warning');
-      logBtn.classList.add('btn-primary');
-      showStatus('Edit cancelled - switched to create new mode', 'info');
-    }
   }
+
+  // Reset form when switching modes
+  resetWorklogForm();
 }
 
 // Load projects for project selector
@@ -453,7 +451,7 @@ async function loadWorkPackageTypes() {
 async function loadWorkPackages() {
   try {
     const response = await makeApiCall(
-      '/api/v3/work_packages?filters=[{"status_id":{"operator":"o"}}]&pageSize=200'
+      '/api/v3/work_packages?filters=[{"status_id":{"operator":"o"}}]&pageSize=200&sortBy=[["updated_at","desc"]]'
     );
 
     let workPackages = response._embedded?.elements || [];
@@ -729,6 +727,9 @@ function formatHoursAsHHMM(hours) {
 
 // Edit worklog
 function editWorklog(worklogItem) {
+  // Switch to existing mode (cannot create new when editing)
+  switchWorkPackageMode('existing');
+
   const id = worklogItem.dataset.id;
   const wpId = worklogItem.dataset.wpId;
   const wpTitle = worklogItem.dataset.wpTitle;
@@ -746,9 +747,6 @@ function editWorklog(worklogItem) {
   // Store the IDs for updating
   window.editingWorklogId = id;
   window.editingWorklogWPId = wpId;
-
-  // Switch to existing mode (cannot create new when editing)
-  switchWorkPackageMode('existing');
 
   // Ensure the work package exists in our global list so it doesn't disappear on filter
   if (window.allWorkPackages) {
@@ -984,6 +982,32 @@ async function logWork() {
   } catch (error) {
     console.error('Error logging work:', error);
     showStatus('Failed to log work: ' + error.message, 'error');
+  }
+}
+
+// Reset the worklog form
+function resetWorklogForm() {
+  document.getElementById('workHours').value = '';
+  if (document.getElementById('workStartTime')) {
+    document.getElementById('workStartTime').value = '';
+    document.getElementById('workEndTime').value = '';
+  }
+  document.getElementById('workComment').value = '';
+  document.getElementById('workPackageSearchInput').value = '';
+  document.getElementById('workPackageSelect').value = '';
+  document.getElementById('taskTitle').value = '';
+  document.getElementById('projectSearchInput').value = '';
+  document.getElementById('projectSelect').value = '';
+
+  // Clear editing state and reset button
+  delete window.editingWorklogId;
+  delete window.editingWorklogWPId;
+
+  const logBtn = document.getElementById('logWorkBtn');
+  if (logBtn) {
+    logBtn.textContent = 'Log Work';
+    logBtn.classList.remove('btn-warning');
+    logBtn.classList.add('btn-primary');
   }
 }
 
