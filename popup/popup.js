@@ -50,8 +50,12 @@ function setupEventListeners() {
     });
 
     // Filter on input
+    const debouncedFilter = debounce((query) => {
+      filterWorkPackageOptions(query);
+    }, 300);
+
     searchInput.addEventListener('input', (e) => {
-      filterWorkPackageOptions(e.target.value);
+      debouncedFilter(e.target.value);
       selectElement.classList.add('show');
       adjustSelectHeight(selectElement);
     });
@@ -95,8 +99,12 @@ function setupEventListeners() {
       adjustSelectHeight(timerSelectElement);
     });
 
+    const debouncedTimerFilter = debounce((query) => {
+      filterTimerWorkPackageOptions(query);
+    }, 300);
+
     timerSearchInput.addEventListener('input', (e) => {
-      filterTimerWorkPackageOptions(e.target.value);
+      debouncedTimerFilter(e.target.value);
       timerSelectElement.classList.add('show');
       adjustSelectHeight(timerSelectElement);
     });
@@ -467,54 +475,50 @@ async function loadWorkPackages() {
 }
 
 // Filter work package options based on search
-function filterWorkPackageOptions(query) {
-  if (!window.allWorkPackages) return;
-
-  const filtered = window.allWorkPackages.filter((wp) => {
-    if (!query) return true;
-
-    const lowerQuery = query.toLowerCase();
-    const id = wp.id.toString();
-    const subject = wp.subject.toLowerCase();
-    const project = wp._links?.project?.title?.toLowerCase() || '';
-
-    return (
-      id.includes(lowerQuery) ||
-      subject.includes(lowerQuery) ||
-      project.includes(lowerQuery)
-    );
-  });
-
-  updateWorkPackageSelects(filtered);
+async function filterWorkPackageOptions(query) {
+  if (!query) {
+    updateWorkPackageSelects(window.allWorkPackages || []);
+    return;
+  }
+  const results = await searchWorkPackagesApi(query);
+  updateWorkPackageSelects(results);
 }
 
 // Filter timer work package options
-function filterTimerWorkPackageOptions(query) {
-  if (!window.allWorkPackages) return;
+async function filterTimerWorkPackageOptions(query) {
+  if (!query) {
+    updateTimerWorkPackageSelect(window.allWorkPackages || []);
+    return;
+  }
+  const results = await searchWorkPackagesApi(query);
+  updateTimerWorkPackageSelect(results);
+}
 
-  const filtered = window.allWorkPackages.filter((wp) => {
-    if (!query) return true;
-
-    const lowerQuery = query.toLowerCase();
-    const id = wp.id.toString();
-    const subject = wp.subject.toLowerCase();
-    const project = wp._links?.project?.title?.toLowerCase() || '';
-
-    return (
-      id.includes(lowerQuery) ||
-      subject.includes(lowerQuery) ||
-      project.includes(lowerQuery)
+// Core API search function for work packages
+async function searchWorkPackagesApi(query, pageSize = 50) {
+  try {
+    const filter = `[{"subjectOrId":{"operator":"**","values":["${query}"]}},{"status_id":{"operator":"o"}}]`;
+    const response = await makeApiCall(
+      `/api/v3/work_packages?filters=${encodeURIComponent(filter)}&pageSize=${pageSize}&sortBy=[["updated_at","desc"]]`
     );
-  });
-
-  updateTimerWorkPackageSelect(filtered);
+    return response._embedded?.elements || [];
+  } catch (error) {
+    console.error('Error searching work packages:', error);
+    return [];
+  }
 }
 
 // Update timer work package select
+// Update timer work package select
 function updateTimerWorkPackageSelect(workPackages) {
   const select = document.getElementById('timerWorkPackage');
-  if (!select) return;
+  if (select) {
+    renderWorkPackageOptions(select, workPackages);
+  }
+}
 
+// Common rendering logic for work package select elements
+function renderWorkPackageOptions(select, workPackages) {
   const currentValue = select.value;
   select.innerHTML = '';
 
@@ -563,32 +567,7 @@ function updateWorkPackageSelects(workPackages) {
   selectElements.forEach((select) => {
     if (!select) return;
 
-    const currentValue = select.value;
-    select.innerHTML = '';
-
-    if (workPackages.length === 0) {
-      const option = document.createElement('option');
-      option.value = '';
-      option.textContent = 'No work packages found';
-      option.disabled = true;
-      select.appendChild(option);
-    } else {
-      workPackages.forEach((wp) => {
-        const option = document.createElement('option');
-        option.value = wp.id;
-        const projectName = wp._links?.project?.title || '';
-        option.textContent = `#${wp.id} - ${wp.subject}${projectName ? ' (' + projectName + ')' : ''}`;
-        select.appendChild(option);
-      });
-    }
-
-    // Restore previous selection if still available
-    if (currentValue) {
-      select.value = currentValue;
-    }
-
-    // Adjust height
-    adjustSelectHeight(select);
+    renderWorkPackageOptions(select, workPackages);
 
     // If this is the timer select, ensure the selection is synced from background state
     if (select.id === 'timerWorkPackage') {
@@ -1714,4 +1693,17 @@ function getWeekNumber(date) {
   d.setUTCDate(d.getUTCDate() + 4 - dayNum);
   const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
   return Math.ceil(((d - yearStart) / 86400000 + 1) / 7);
+}
+
+// Utility to debounce function calls
+function debounce(func, wait) {
+  let timeout;
+  return function executedFunction(...args) {
+    const later = () => {
+      clearTimeout(timeout);
+      func(...args);
+    };
+    clearTimeout(timeout);
+    timeout = setTimeout(later, wait);
+  };
 }
