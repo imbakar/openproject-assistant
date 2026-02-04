@@ -454,6 +454,28 @@ header h1 {
   background: #c82333;
 }
 
+.worklog-action-btn.log-again,
+.task-action-btn.log-again {
+  background: #667eea;
+  color: white;
+}
+
+.worklog-action-btn.log-again:hover,
+.task-action-btn.log-again:hover {
+  background: #5568d3;
+}
+
+.worklog-action-btn.timer,
+.task-action-btn.timer {
+  background: #28a745;
+  color: white;
+}
+
+.worklog-action-btn.timer:hover,
+.task-action-btn.timer:hover {
+  background: #218838;
+}
+
 /* Task Items */
 .task-item {
   padding: 12px;
@@ -524,6 +546,25 @@ header h1 {
 .task-project {
   font-size: 12px;
   color: #6c757d;
+  margin-bottom: 8px;
+}
+
+.task-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #dee2e6;
+}
+
+.task-action-btn {
+  padding: 4px 12px;
+  font-size: 12px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-weight: 500;
 }
 
 /* Filters */

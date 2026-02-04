@@ -234,6 +234,14 @@ function setupEventListeners() {
   document
     .getElementById('taskProjectFilter')
     .addEventListener('change', loadTasks);
+
+  // Sync inputs with background
+  document
+    .getElementById('timerWorkPackage')
+    .addEventListener('change', saveTimerState);
+  document
+    .getElementById('timerComment')
+    .addEventListener('input', saveTimerState);
 }
 
 // Switch tabs
@@ -278,7 +286,7 @@ async function checkConnection() {
   // If we have a successful connection check from the last hour, use it
   if (lastConnectionCheck && now - lastConnectionCheck < oneHour) {
     // showStatus('Connected to OpenProject', 'success');
-    const statusEl = document.getElementById('connectionStatus');
+    const statusEl = document.getElementById('connectionStatusWorklog');
     statusEl.style.display = 'none';
     return true;
   }
@@ -301,7 +309,12 @@ async function checkConnection() {
 
 // Show status message
 function showStatus(message, type = 'info') {
-  const statusEl = document.getElementById('connectionStatus');
+  const activeTab = document.querySelector('.tab-content.active');
+  if (!activeTab) return;
+
+  const statusEl = activeTab.querySelector('.status-indicator');
+  if (!statusEl) return;
+
   statusEl.textContent = message;
   statusEl.className = `status-indicator ${type}`;
   statusEl.style.display = 'block';
@@ -578,6 +591,15 @@ function updateWorkPackageSelects(workPackages) {
 
     // Adjust height
     adjustSelectHeight(select);
+
+    // If this is the timer select, ensure the selection is synced from background state
+    if (select.id === 'timerWorkPackage') {
+      chrome.runtime.sendMessage({ action: 'getTimerState' }, (state) => {
+        if (state.workPackageId) {
+          syncTimerWPSelection(state.workPackageId);
+        }
+      });
+    }
   });
 }
 
@@ -627,6 +649,12 @@ async function loadRecentWorklogs() {
           <div class="worklog-date">${new Date(wl.spentOn).toLocaleDateString()}</div>
           ${wl.comment?.raw ? `<div class="worklog-comment">${commentEscaped}</div>` : ''}
           <div class="worklog-actions">
+            <button class="worklog-action-btn log-again" data-action="log-again">
+              Log
+            </button>
+            <button class="worklog-action-btn timer" data-action="timer">
+              Tracker
+            </button>
             <button class="worklog-action-btn edit" data-action="edit">
               Edit
             </button>
@@ -650,6 +678,13 @@ async function loadRecentWorklogs() {
           editWorklog(worklogItem);
         } else if (action === 'delete') {
           deleteWorklog(worklogItem.dataset.id);
+        } else if (action === 'log-again') {
+          prefillWorklog(worklogItem.dataset.wpId, worklogItem.dataset.wpTitle);
+        } else if (action === 'timer') {
+          startTimerForWP(
+            worklogItem.dataset.wpId,
+            worklogItem.dataset.wpTitle
+          );
         }
       });
     });
@@ -940,70 +975,272 @@ function convertISO8601ToHours(duration) {
   return hours + minutes / 60;
 }
 
-// Timer functions
-function startTimer() {
-  if (!document.getElementById('timerWorkPackage').value) {
-    showStatus('Please select a work package for the timer', 'warning');
-    return;
+// Helper to pre-fill worklog form for a specific work package
+function prefillWorklog(wpId, wpTitle) {
+  // Cancel edit mode if active
+  if (window.editingWorklogId) {
+    delete window.editingWorklogId;
+    delete window.editingWorklogWPId;
+    const logBtn = document.getElementById('logWorkBtn');
+    logBtn.textContent = 'Log Work';
+    logBtn.classList.remove('btn-warning');
+    logBtn.classList.add('btn-primary');
   }
 
-  isPaused = false;
-
-  if (!timerInterval) {
-    timerInterval = setInterval(() => {
-      if (!isPaused) {
-        timerSeconds++;
-        updateTimerDisplay();
-        saveTimerState();
-      }
-    }, 1000);
+  // Ensure the work package exists in our global list
+  if (window.allWorkPackages) {
+    const exists = window.allWorkPackages.find(
+      (wp) => wp.id.toString() === wpId.toString()
+    );
+    if (!exists) {
+      window.allWorkPackages.push({
+        id: parseInt(wpId),
+        subject: wpTitle,
+        _links: { project: { title: '' } },
+      });
+    }
   }
 
-  document.getElementById('startTimerBtn').disabled = true;
-  document.getElementById('pauseTimerBtn').disabled = false;
-  document.getElementById('stopTimerBtn').disabled = false;
-}
+  // Update the select options
+  updateWorkPackageSelects(window.allWorkPackages || []);
 
-function pauseTimer() {
-  isPaused = !isPaused;
-  document.getElementById('pauseTimerBtn').textContent = isPaused
-    ? 'Resume'
-    : 'Pause';
-}
+  switchWorkPackageMode('existing');
 
-function stopTimer() {
-  if (timerInterval) {
-    clearInterval(timerInterval);
-    timerInterval = null;
-  }
+  // Pre-fill form
+  const select = document.getElementById('workPackageSelect');
+  select.value = wpId;
 
-  // Auto-fill worklog form
-  const hours = (timerSeconds / 3600).toFixed(2);
-  const workPackageId = document.getElementById('timerWorkPackage').value;
-  const comment = document.getElementById('timerComment').value;
-
-  document.getElementById('workPackageSelect').value = workPackageId;
-
-  // Update search input to show selected work package
-  const selectedOption = document.querySelector(
-    `#workPackageSelect option[value="${workPackageId}"]`
-  );
+  // Update search input
+  const selectedOption = select.querySelector(`option[value="${wpId}"]`);
   if (selectedOption) {
     document.getElementById('workPackageSearchInput').value =
       selectedOption.textContent;
+  } else {
+    document.getElementById('workPackageSearchInput').value =
+      `#${wpId} - ${wpTitle}`;
   }
 
-  document.getElementById('workHours').value = hours;
-  document.getElementById('workComment').value = comment;
+  // Set date to today
+  const now = new Date();
+  document.getElementById('workDate').value = now.toISOString().split('T')[0];
+
+  // Set end time to current time and clear start time
+  const currentTime = now.toTimeString().slice(0, 5);
+  const startTimeInput = document.getElementById('workStartTime');
+  const endTimeInput = document.getElementById('workEndTime');
+  if (endTimeInput) {
+    endTimeInput.value = currentTime;
+  }
+  if (startTimeInput) {
+    startTimeInput.value = ''; // Clear start time so user can enter it
+  }
 
   // Switch to worklog tab
   switchTab('worklog');
 
-  resetTimer();
-  showStatus(`Timer stopped. ${hours} hours ready to log.`, 'success');
+  // Focus and scroll to start time field
+  if (startTimeInput) {
+    setTimeout(() => {
+      startTimeInput.focus();
+      startTimeInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 100);
+  } else {
+    // Fallback to top
+    const tabContent = document.getElementById('worklog');
+    if (tabContent) tabContent.scrollTop = 0;
+  }
+
+  showStatus('Work package selected - enter hours and log', 'info');
+}
+
+// Helper to start timer for a specific work package
+function startTimerForWP(wpId, wpTitle) {
+  chrome.runtime.sendMessage({ action: 'getTimerState' }, (state) => {
+    if (
+      state.isRunning &&
+      !confirm('A timer is already running. Start new timer for this task?')
+    ) {
+      return;
+    }
+
+    if (state.isRunning || state.seconds > 0) {
+      resetTimer();
+    }
+
+    // Ensure the work package exists in our global list
+    if (window.allWorkPackages) {
+      const exists = window.allWorkPackages.find(
+        (wp) => wp.id.toString() === wpId.toString()
+      );
+      if (!exists) {
+        window.allWorkPackages.push({
+          id: parseInt(wpId),
+          subject: wpTitle,
+          _links: { project: { title: '' } },
+        });
+      }
+    }
+
+    // Update the select options
+    updateWorkPackageSelects(window.allWorkPackages || []);
+
+    const timerSelect = document.getElementById('timerWorkPackage');
+    timerSelect.value = wpId;
+
+    // Update search input
+    const selectedOption = timerSelect.querySelector(`option[value="${wpId}"]`);
+    if (selectedOption) {
+      const timerSearchInput = document.getElementById(
+        'timerWorkPackageSearch'
+      );
+      if (timerSearchInput) {
+        timerSearchInput.value = selectedOption.textContent;
+      }
+    } else {
+      const timerSearchInput = document.getElementById(
+        'timerWorkPackageSearch'
+      );
+      if (timerSearchInput) {
+        timerSearchInput.value = `#${wpId} - ${wpTitle}`;
+      }
+    }
+
+    switchTab('timer');
+    startTimer();
+    showStatus('Timer started for #' + wpId, 'success');
+  });
+}
+
+// Timer functions
+function startTimer() {
+  const wpId = document.getElementById('timerWorkPackage').value;
+  const comment = document.getElementById('timerComment').value;
+  if (!wpId || wpId === '') {
+    showStatus('Please select a work package for the timer', 'warning');
+    return;
+  }
+
+  chrome.runtime.sendMessage(
+    { action: 'startTimer', workPackageId: wpId, comment: comment },
+    (response) => {
+      if (response.success) {
+        if (!timerInterval) {
+          timerInterval = setInterval(refreshTimerFromBackground, 1000);
+        }
+        document.getElementById('startTimerBtn').disabled = true;
+        document.getElementById('pauseTimerBtn').disabled = false;
+        document.getElementById('stopTimerBtn').disabled = false;
+        document.getElementById('pauseTimerBtn').textContent = 'Pause';
+        isPaused = false;
+      }
+    }
+  );
+}
+
+function pauseTimer() {
+  const action = isPaused ? 'startTimer' : 'pauseTimer';
+  const wpId = document.getElementById('timerWorkPackage').value;
+  const comment = document.getElementById('timerComment').value;
+
+  chrome.runtime.sendMessage(
+    { action: action, workPackageId: wpId, comment: comment },
+    (response) => {
+      if (response.success) {
+        isPaused = !isPaused;
+        document.getElementById('pauseTimerBtn').textContent = isPaused
+          ? 'Resume'
+          : 'Pause';
+      }
+    }
+  );
+}
+
+function refreshTimerFromBackground() {
+  chrome.runtime.sendMessage({ action: 'getTimerState' }, (state) => {
+    timerSeconds = state.seconds;
+    updateTimerDisplay();
+
+    // Sync button states if they changed in background
+    if (!state.isRunning && !isPaused && timerSeconds > 0) {
+      isPaused = true;
+      document.getElementById('pauseTimerBtn').textContent = 'Resume';
+      document.getElementById('startTimerBtn').disabled = false;
+    }
+  });
+}
+
+function stopTimer() {
+  chrome.runtime.sendMessage({ action: 'getTimerState' }, (state) => {
+    const seconds = state.seconds;
+    const workPackageId = state.workPackageId;
+    const comment = state.comment;
+
+    chrome.runtime.sendMessage({ action: 'resetTimer' }, () => {
+      if (timerInterval) {
+        clearInterval(timerInterval);
+        timerInterval = null;
+      }
+
+      const now = new Date();
+      const endTimeStr = now.toTimeString().slice(0, 5);
+      const startTimeObj = new Date(now.getTime() - seconds * 1000);
+      const startTimeStr = startTimeObj.toTimeString().slice(0, 5);
+
+      // Auto-fill worklog form
+      const hours = (seconds / 3600).toFixed(2);
+
+      document.getElementById('workPackageSelect').value = workPackageId;
+
+      // Update search input to show selected work package
+      const selectedOption = document.querySelector(
+        `#workPackageSelect option[value="${workPackageId}"]`
+      );
+      if (selectedOption) {
+        document.getElementById('workPackageSearchInput').value =
+          selectedOption.textContent;
+      }
+
+      // Set times and date
+      const workStartTimeInput = document.getElementById('workStartTime');
+      const workEndTimeInput = document.getElementById('workEndTime');
+      const workDateInput = document.getElementById('workDate');
+      const workHoursInput = document.getElementById('workHours');
+      const workCommentInput = document.getElementById('workComment');
+
+      if (workStartTimeInput) workStartTimeInput.value = startTimeStr;
+      if (workEndTimeInput) workEndTimeInput.value = endTimeStr;
+      if (workDateInput)
+        workDateInput.value = startTimeObj.toISOString().split('T')[0];
+      if (workHoursInput) workHoursInput.value = hours;
+      if (workCommentInput) workCommentInput.value = comment;
+
+      // Switch to worklog tab
+      switchTab('worklog');
+
+      resetTimerUI();
+      showStatus(`Timer stopped. ${hours} hours ready to log.`, 'success');
+
+      // Focus start time for review
+      if (workStartTimeInput) {
+        setTimeout(() => {
+          workStartTimeInput.focus();
+          workStartTimeInput.scrollIntoView({
+            behavior: 'smooth',
+            block: 'center',
+          });
+        }, 100);
+      }
+    });
+  });
 }
 
 function resetTimer() {
+  chrome.runtime.sendMessage({ action: 'resetTimer' }, () => {
+    resetTimerUI();
+  });
+}
+
+function resetTimerUI() {
   if (timerInterval) {
     clearInterval(timerInterval);
     timerInterval = null;
@@ -1012,7 +1249,6 @@ function resetTimer() {
   timerSeconds = 0;
   isPaused = false;
   updateTimerDisplay();
-  saveTimerState();
 
   document.getElementById('startTimerBtn').disabled = false;
   document.getElementById('pauseTimerBtn').disabled = true;
@@ -1034,41 +1270,65 @@ function pad(num) {
 }
 
 function saveTimerState() {
-  chrome.storage.local.set({
-    timerSeconds,
-    timerWorkPackage: document.getElementById('timerWorkPackage').value,
-    timerComment: document.getElementById('timerComment').value,
+  const wpId = document.getElementById('timerWorkPackage').value;
+  const comment = document.getElementById('timerComment').value;
+
+  chrome.runtime.sendMessage({
+    action: 'updateTimerData',
+    workPackageId: wpId,
+    comment: comment,
   });
 }
 
 function loadTimerState() {
-  chrome.storage.local.get(
-    ['timerSeconds', 'timerWorkPackage', 'timerComment'],
-    (data) => {
-      if (data.timerSeconds) {
-        timerSeconds = data.timerSeconds;
-        updateTimerDisplay();
-      }
-      if (data.timerWorkPackage) {
-        document.getElementById('timerWorkPackage').value =
-          data.timerWorkPackage;
+  chrome.runtime.sendMessage({ action: 'getTimerState' }, (state) => {
+    timerSeconds = state.seconds || 0;
+    isPaused = !state.isRunning && timerSeconds > 0;
 
-        // Update search input
-        const selectedOption = document.querySelector(
-          `#timerWorkPackage option[value="${data.timerWorkPackage}"]`
-        );
-        if (selectedOption) {
-          const searchInput = document.getElementById('timerWorkPackageSearch');
-          if (searchInput) {
-            searchInput.value = selectedOption.textContent;
-          }
-        }
+    updateTimerDisplay();
+
+    if (state.isRunning) {
+      if (!timerInterval) {
+        timerInterval = setInterval(refreshTimerFromBackground, 1000);
       }
-      if (data.timerComment) {
-        document.getElementById('timerComment').value = data.timerComment;
-      }
+      document.getElementById('startTimerBtn').disabled = true;
+      document.getElementById('pauseTimerBtn').disabled = false;
+      document.getElementById('stopTimerBtn').disabled = false;
+      document.getElementById('pauseTimerBtn').textContent = 'Pause';
+    } else if (isPaused) {
+      document.getElementById('startTimerBtn').disabled = false;
+      document.getElementById('pauseTimerBtn').disabled = false;
+      document.getElementById('stopTimerBtn').disabled = false;
+      document.getElementById('pauseTimerBtn').textContent = 'Resume';
     }
-  );
+
+    if (state.workPackageId) {
+      document.getElementById('timerWorkPackage').value = state.workPackageId;
+
+      // Update search input
+      // This is a bit tricky because allWorkPackages might not be loaded yet
+      // We'll try now and also ensure it happens after work packages load
+      syncTimerWPSelection(state.workPackageId);
+    }
+
+    if (state.comment) {
+      document.getElementById('timerComment').value = state.comment;
+    }
+  });
+}
+
+function syncTimerWPSelection(wpId) {
+  const select = document.getElementById('timerWorkPackage');
+  if (!select) return;
+
+  select.value = wpId;
+  const selectedOption = select.querySelector(`option[value="${wpId}"]`);
+  if (selectedOption) {
+    const searchInput = document.getElementById('timerWorkPackageSearch');
+    if (searchInput) {
+      searchInput.value = selectedOption.textContent;
+    }
+  }
 }
 
 // Load tasks
@@ -1132,24 +1392,51 @@ async function loadTasks() {
 
     const settings = await chrome.storage.sync.get(['serverUrl']);
 
-    container.innerHTML = tasks
+    const tasksHtml = tasks
       .map((task) => {
         const status = task._links.status?.title || 'Unknown';
         const statusClass = status.toLowerCase().replace(/\s+/g, '-');
         const wpUrl = `${settings.serverUrl}/work_packages/${task.id}`;
 
         return `
-        <div class="task-item" data-id="${task.id}">
+        <div class="task-item" data-id="${task.id}" data-title="${escapeHtml(task.subject)}">
           <div class="task-header">
             <a href="${wpUrl}" target="_blank" class="task-id">#${task.id}</a>
             <div class="task-status ${statusClass}">${escapeHtml(status)}</div>
           </div>
           <div class="task-title">${escapeHtml(task.subject)}</div>
           <div class="task-project">${escapeHtml(task._links.project?.title || 'Unknown Project')}</div>
+          <div class="task-actions">
+            <button class="task-action-btn log-again" data-action="log-again">
+              Log Work
+            </button>
+            <button class="task-action-btn timer" data-action="timer">
+              Start Tracker
+            </button>
+          </div>
         </div>
       `;
       })
       .join('');
+
+    container.innerHTML = tasksHtml;
+
+    // Add event listeners for task action buttons
+    container.querySelectorAll('.task-action-btn').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const taskItem = e.target.closest('.task-item');
+        const action = e.target.dataset.action;
+        const wpId = taskItem.dataset.id;
+        const wpTitle = taskItem.dataset.title;
+
+        if (action === 'log-again') {
+          prefillWorklog(wpId, wpTitle);
+        } else if (action === 'timer') {
+          startTimerForWP(wpId, wpTitle);
+        }
+      });
+    });
   } catch (error) {
     console.error('Error loading tasks:', error);
     container.innerHTML = `<p class="empty-state">Failed to load tasks: ${error.message}</p>`;

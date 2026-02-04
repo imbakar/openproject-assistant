@@ -27,7 +27,7 @@
     <div id="worklog" class="tab-content active">
       <div class="section">
         <h2>Log Work</h2>
-        <div id="connectionStatus" class="status-indicator"></div>
+        <div id="connectionStatusWorklog" class="status-indicator" style="display: none;"></div>
 
         <div class="form-group">
           <label>Work Package Mode</label>
@@ -91,7 +91,6 @@
         <div class="form-group">
           <label for="workHours">Hours</label>
           <input type="number" id="workHours" min="0" max="24" step="0.25" placeholder="Hours spent (or use time range above)" />
-          <small>Enter hours manually or use start/end time above</small>
         </div>
 
         <div class="form-group">
@@ -114,6 +113,7 @@
     <div id="timer" class="tab-content">
       <div class="section">
         <h2>Time Tracker</h2>
+        <div id="connectionStatusTimer" class="status-indicator" style="display: none;"></div>
 
         <div class="timer-display">
           <div id="timerTime" class="timer-time">00:00:00</div>

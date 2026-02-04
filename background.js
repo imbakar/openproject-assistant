@@ -67,6 +67,13 @@ async function checkMissingWorklogs() {
   }
 }
 
+// Timer state
+let timerStartTime = null;
+let timerAccumulatedSeconds = 0;
+let timerIsRunning = false;
+let timerWorkPackageId = '';
+let timerComment = '';
+
 // Handle messages from popup and content scripts
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'makeApiCall') {
@@ -75,7 +82,81 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       .catch((error) => sendResponse({ error: error.message }));
     return true; // Keep the message channel open for async response
   }
+
+  if (request.action === 'startTimer') {
+    if (!timerIsRunning) {
+      timerStartTime = Date.now();
+      timerIsRunning = true;
+      timerWorkPackageId = request.workPackageId;
+      timerComment = request.comment;
+      saveTimerStateToStorage();
+    }
+    sendResponse({ success: true });
+  } else if (request.action === 'pauseTimer') {
+    if (timerIsRunning) {
+      timerAccumulatedSeconds += Math.floor(
+        (Date.now() - timerStartTime) / 1000
+      );
+      timerIsRunning = false;
+      saveTimerStateToStorage();
+    }
+    sendResponse({ success: true });
+  } else if (request.action === 'resetTimer') {
+    timerStartTime = null;
+    timerAccumulatedSeconds = 0;
+    timerIsRunning = false;
+    timerWorkPackageId = '';
+    timerComment = '';
+    saveTimerStateToStorage();
+    sendResponse({ success: true });
+  } else if (request.action === 'getTimerState') {
+    let currentSeconds = timerAccumulatedSeconds;
+    if (timerIsRunning) {
+      currentSeconds += Math.floor((Date.now() - timerStartTime) / 1000);
+    }
+    sendResponse({
+      seconds: currentSeconds,
+      isRunning: timerIsRunning,
+      workPackageId: timerWorkPackageId,
+      comment: timerComment,
+    });
+  } else if (request.action === 'updateTimerData') {
+    timerWorkPackageId = request.workPackageId;
+    timerComment = request.comment;
+    saveTimerStateToStorage();
+    sendResponse({ success: true });
+  }
 });
+
+function saveTimerStateToStorage() {
+  chrome.storage.local.set({
+    timerStartTime,
+    timerAccumulatedSeconds,
+    timerIsRunning,
+    timerWorkPackageId,
+    timerComment,
+  });
+}
+
+// Load timer state on startup
+chrome.storage.local.get(
+  [
+    'timerStartTime',
+    'timerAccumulatedSeconds',
+    'timerIsRunning',
+    'timerWorkPackageId',
+    'timerComment',
+  ],
+  (data) => {
+    if (data.timerStartTime !== undefined) timerStartTime = data.timerStartTime;
+    if (data.timerAccumulatedSeconds !== undefined)
+      timerAccumulatedSeconds = data.timerAccumulatedSeconds;
+    if (data.timerIsRunning !== undefined) timerIsRunning = data.timerIsRunning;
+    if (data.timerWorkPackageId !== undefined)
+      timerWorkPackageId = data.timerWorkPackageId;
+    if (data.timerComment !== undefined) timerComment = data.timerComment;
+  }
+);
 
 // Make API calls to OpenProject
 async function makeApiCall(endpoint, method = 'GET', data = null) {
