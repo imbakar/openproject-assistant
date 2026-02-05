@@ -69,10 +69,47 @@ async function checkMissingWorklogs() {
 
 // Timer state
 let timerStartTime = null;
-let timerAccumulatedSeconds = 0;
+let timerAccumulatedMS = 0;
 let timerIsRunning = false;
 let timerWorkPackageId = '';
 let timerComment = '';
+
+// Promise to ensure state is loaded before handling messages
+const stateLoaded = new Promise((resolve) => {
+  chrome.storage.local.get(
+    [
+      'timerStartTime',
+      'timerAccumulatedMS',
+      'timerAccumulatedSeconds', // Legacy support
+      'timerIsRunning',
+      'timerWorkPackageId',
+      'timerComment',
+    ],
+    (data) => {
+      if (data.timerStartTime !== undefined)
+        timerStartTime = data.timerStartTime;
+
+      // Handle migration from seconds to milliseconds
+      if (data.timerAccumulatedMS !== undefined) {
+        timerAccumulatedMS = data.timerAccumulatedMS;
+      } else if (data.timerAccumulatedSeconds !== undefined) {
+        timerAccumulatedMS = data.timerAccumulatedSeconds * 1000;
+      }
+
+      if (data.timerIsRunning !== undefined)
+        timerIsRunning = data.timerIsRunning;
+      if (data.timerWorkPackageId !== undefined)
+        timerWorkPackageId = data.timerWorkPackageId;
+      if (data.timerComment !== undefined) timerComment = data.timerComment;
+
+      console.log('Timer state loaded:', {
+        timerIsRunning,
+        timerAccumulatedMS,
+      });
+      resolve();
+    }
+  );
+});
 
 // Handle messages from popup and content scripts
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -83,80 +120,64 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true; // Keep the message channel open for async response
   }
 
-  if (request.action === 'startTimer') {
-    if (!timerIsRunning) {
-      timerStartTime = Date.now();
-      timerIsRunning = true;
+  // Wrap timer actions in stateLoaded promise
+  stateLoaded.then(() => {
+    if (request.action === 'startTimer') {
+      if (!timerIsRunning) {
+        timerStartTime = Date.now();
+        timerIsRunning = true;
+        timerWorkPackageId = request.workPackageId;
+        timerComment = request.comment;
+        saveTimerStateToStorage();
+      }
+      sendResponse({ success: true, isRunning: timerIsRunning });
+    } else if (request.action === 'pauseTimer') {
+      if (timerIsRunning) {
+        timerAccumulatedMS += Date.now() - timerStartTime;
+        timerIsRunning = false;
+        timerStartTime = null;
+        saveTimerStateToStorage();
+      }
+      sendResponse({ success: true });
+    } else if (request.action === 'resetTimer') {
+      timerStartTime = null;
+      timerAccumulatedMS = 0;
+      timerIsRunning = false;
+      timerWorkPackageId = '';
+      timerComment = '';
+      saveTimerStateToStorage();
+      sendResponse({ success: true });
+    } else if (request.action === 'getTimerState') {
+      let currentMS = timerAccumulatedMS;
+      if (timerIsRunning && timerStartTime) {
+        currentMS += Date.now() - timerStartTime;
+      }
+      sendResponse({
+        seconds: Math.floor(currentMS / 1000),
+        isRunning: timerIsRunning,
+        workPackageId: timerWorkPackageId,
+        comment: timerComment,
+      });
+    } else if (request.action === 'updateTimerData') {
       timerWorkPackageId = request.workPackageId;
       timerComment = request.comment;
       saveTimerStateToStorage();
+      sendResponse({ success: true });
     }
-    sendResponse({ success: true });
-  } else if (request.action === 'pauseTimer') {
-    if (timerIsRunning) {
-      timerAccumulatedSeconds += Math.floor(
-        (Date.now() - timerStartTime) / 1000
-      );
-      timerIsRunning = false;
-      saveTimerStateToStorage();
-    }
-    sendResponse({ success: true });
-  } else if (request.action === 'resetTimer') {
-    timerStartTime = null;
-    timerAccumulatedSeconds = 0;
-    timerIsRunning = false;
-    timerWorkPackageId = '';
-    timerComment = '';
-    saveTimerStateToStorage();
-    sendResponse({ success: true });
-  } else if (request.action === 'getTimerState') {
-    let currentSeconds = timerAccumulatedSeconds;
-    if (timerIsRunning) {
-      currentSeconds += Math.floor((Date.now() - timerStartTime) / 1000);
-    }
-    sendResponse({
-      seconds: currentSeconds,
-      isRunning: timerIsRunning,
-      workPackageId: timerWorkPackageId,
-      comment: timerComment,
-    });
-  } else if (request.action === 'updateTimerData') {
-    timerWorkPackageId = request.workPackageId;
-    timerComment = request.comment;
-    saveTimerStateToStorage();
-    sendResponse({ success: true });
-  }
+  });
+
+  return true; // Keep message channel open for async handlers
 });
 
 function saveTimerStateToStorage() {
   chrome.storage.local.set({
     timerStartTime,
-    timerAccumulatedSeconds,
+    timerAccumulatedMS,
     timerIsRunning,
     timerWorkPackageId,
     timerComment,
   });
 }
-
-// Load timer state on startup
-chrome.storage.local.get(
-  [
-    'timerStartTime',
-    'timerAccumulatedSeconds',
-    'timerIsRunning',
-    'timerWorkPackageId',
-    'timerComment',
-  ],
-  (data) => {
-    if (data.timerStartTime !== undefined) timerStartTime = data.timerStartTime;
-    if (data.timerAccumulatedSeconds !== undefined)
-      timerAccumulatedSeconds = data.timerAccumulatedSeconds;
-    if (data.timerIsRunning !== undefined) timerIsRunning = data.timerIsRunning;
-    if (data.timerWorkPackageId !== undefined)
-      timerWorkPackageId = data.timerWorkPackageId;
-    if (data.timerComment !== undefined) timerComment = data.timerComment;
-  }
-);
 
 // Make API calls to OpenProject
 async function makeApiCall(endpoint, method = 'GET', data = null) {

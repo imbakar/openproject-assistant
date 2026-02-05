@@ -459,7 +459,7 @@ async function loadWorkPackageTypes() {
 async function loadWorkPackages() {
   try {
     const response = await makeApiCall(
-      '/api/v3/work_packages?filters=[{"status_id":{"operator":"o"}}]&pageSize=200&sortBy=[["updated_at","desc"]]'
+      '/api/v3/work_packages?filters=[{"status_id":{"operator":"o"}}]&pageSize=50&sortBy=[["updated_at","desc"]]'
     );
 
     let workPackages = response._embedded?.elements || [];
@@ -1106,51 +1106,57 @@ function startTimerForWP(wpId, wpTitle) {
       return;
     }
 
-    if (state.isRunning || state.seconds > 0) {
-      resetTimer();
-    }
-
-    // Ensure the work package exists in our global list
-    if (window.allWorkPackages) {
-      const exists = window.allWorkPackages.find(
-        (wp) => wp.id.toString() === wpId.toString()
-      );
-      if (!exists) {
-        window.allWorkPackages.push({
-          id: parseInt(wpId),
-          subject: wpTitle,
-          _links: { project: { title: '' } },
-        });
+    const proceedWithStart = () => {
+      // Ensure the work package exists in our global list
+      if (window.allWorkPackages) {
+        const exists = window.allWorkPackages.find(
+          (wp) => wp.id.toString() === wpId.toString()
+        );
+        if (!exists) {
+          window.allWorkPackages.push({
+            id: parseInt(wpId),
+            subject: wpTitle,
+            _links: { project: { title: '' } },
+          });
+        }
       }
-    }
 
-    // Update the select options
-    updateWorkPackageSelects(window.allWorkPackages || []);
+      // Update the select options
+      updateWorkPackageSelects(window.allWorkPackages || []);
 
-    const timerSelect = document.getElementById('timerWorkPackage');
-    timerSelect.value = wpId;
+      const timerSelect = document.getElementById('timerWorkPackage');
+      if (timerSelect) {
+        timerSelect.value = wpId;
 
-    // Update search input
-    const selectedOption = timerSelect.querySelector(`option[value="${wpId}"]`);
-    if (selectedOption) {
-      const timerSearchInput = document.getElementById(
-        'timerWorkPackageSearch'
-      );
-      if (timerSearchInput) {
-        timerSearchInput.value = selectedOption.textContent;
+        // Update search input
+        const selectedOption = timerSelect.querySelector(
+          `option[value="${wpId}"]`
+        );
+        const timerSearchInput = document.getElementById(
+          'timerWorkPackageSearch'
+        );
+        if (timerSearchInput) {
+          if (selectedOption) {
+            timerSearchInput.value = selectedOption.textContent;
+          } else {
+            timerSearchInput.value = `#${wpId} - ${wpTitle}`;
+          }
+        }
       }
+
+      switchTab('timer');
+      startTimer();
+      showStatus('Timer started for #' + wpId, 'success');
+    };
+
+    if (state.isRunning || (state.seconds && state.seconds > 0)) {
+      chrome.runtime.sendMessage({ action: 'resetTimer' }, () => {
+        resetTimerUI();
+        proceedWithStart();
+      });
     } else {
-      const timerSearchInput = document.getElementById(
-        'timerWorkPackageSearch'
-      );
-      if (timerSearchInput) {
-        timerSearchInput.value = `#${wpId} - ${wpTitle}`;
-      }
+      proceedWithStart();
     }
-
-    switchTab('timer');
-    startTimer();
-    showStatus('Timer started for #' + wpId, 'success');
   });
 }
 
@@ -1166,12 +1172,13 @@ function startTimer() {
   chrome.runtime.sendMessage(
     { action: 'startTimer', workPackageId: wpId, comment: comment },
     (response) => {
-      if (response.success) {
+      if (response && response.success) {
         if (!timerInterval) {
           timerInterval = setInterval(refreshTimerFromBackground, 1000);
         }
         isPaused = false;
-        updateTimerButtons(true, timerSeconds, isPaused);
+        // Refresh immediately to get the current state and update buttons
+        refreshTimerFromBackground();
       }
     }
   );
@@ -1185,9 +1192,10 @@ function pauseTimer() {
   chrome.runtime.sendMessage(
     { action: action, workPackageId: wpId, comment: comment },
     (response) => {
-      if (response.success) {
+      if (response && response.success) {
         isPaused = !isPaused;
-        updateTimerButtons(!isPaused, timerSeconds, isPaused);
+        // Refresh immediately to sync state
+        refreshTimerFromBackground();
       }
     }
   );
@@ -1195,15 +1203,14 @@ function pauseTimer() {
 
 function refreshTimerFromBackground() {
   chrome.runtime.sendMessage({ action: 'getTimerState' }, (state) => {
+    if (!state) return;
+
     timerSeconds = state.seconds;
     updateTimerDisplay();
 
-    // Sync button states if they changed in background
-    const backgroundIsPaused = !state.isRunning && timerSeconds > 0;
-    if (state.isRunning !== !isPaused || backgroundIsPaused !== isPaused) {
-      isPaused = backgroundIsPaused;
-      updateTimerButtons(state.isRunning, timerSeconds, isPaused);
-    }
+    // Sync button states
+    isPaused = !state.isRunning && timerSeconds > 0;
+    updateTimerButtons(state.isRunning, timerSeconds, isPaused);
   });
 }
 
@@ -1322,6 +1329,11 @@ function loadTimerState() {
     updateTimerDisplay();
     updateTimerButtons(state.isRunning, timerSeconds, isPaused);
 
+    // If timer is running or active, switch to timer tab
+    if (state.isRunning || timerSeconds > 0) {
+      switchTab('timer');
+    }
+
     if (state.isRunning && !timerInterval) {
       timerInterval = setInterval(refreshTimerFromBackground, 1000);
     }
@@ -1434,7 +1446,7 @@ async function loadTasks() {
 
     const filtersJson = JSON.stringify(filterArray);
     const response = await makeApiCall(
-      `/api/v3/work_packages?filters=${encodeURIComponent(filtersJson)}&pageSize=100&sortBy=[["updated_at","desc"]]`
+      `/api/v3/work_packages?filters=${encodeURIComponent(filtersJson)}&pageSize=50&sortBy=[["updated_at","desc"]]`
     );
 
     const tasks = response._embedded?.elements || [];
