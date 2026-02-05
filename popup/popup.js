@@ -38,146 +38,20 @@ function setupEventListeners() {
     showStatus('Data refreshed', 'success');
   });
 
-  // Searchable select for work packages
-  const searchInput = document.getElementById('workPackageSearchInput');
-  const selectElement = document.getElementById('workPackageSelect');
+  // Setup all searchable selects
+  setupSearchableSelect(
+    'workPackageSearchInput',
+    'workPackageSelect',
+    (query) => filterWorkPackageOptions(query, updateWorkPackageSelects)
+  );
 
-  if (searchInput && selectElement) {
-    // Show dropdown on focus
-    searchInput.addEventListener('focus', () => {
-      selectElement.classList.add('show');
-      adjustSelectHeight(selectElement);
-    });
+  setupSearchableSelect('timerWorkPackageSearch', 'timerWorkPackage', (query) =>
+    filterWorkPackageOptions(query, updateTimerWorkPackageSelect)
+  );
 
-    // Filter on input
-    const debouncedFilter = debounce((query) => {
-      filterWorkPackageOptions(query);
-    }, 300);
-
-    searchInput.addEventListener('input', (e) => {
-      debouncedFilter(e.target.value);
-      selectElement.classList.add('show');
-      adjustSelectHeight(selectElement);
-    });
-
-    // Select option
-    selectElement.addEventListener('change', () => {
-      const selectedOption = selectElement.options[selectElement.selectedIndex];
-      if (selectedOption && selectedOption.value) {
-        searchInput.value = selectedOption.textContent;
-        selectElement.classList.remove('show');
-      }
-    });
-
-    // Click option to select
-    selectElement.addEventListener('click', (e) => {
-      if (e.target.tagName === 'OPTION' && e.target.value) {
-        searchInput.value = e.target.textContent;
-        selectElement.value = e.target.value;
-        selectElement.classList.remove('show');
-      }
-    });
-
-    // Click outside to close
-    document.addEventListener('click', (e) => {
-      if (
-        !searchInput.contains(e.target) &&
-        !selectElement.contains(e.target)
-      ) {
-        selectElement.classList.remove('show');
-      }
-    });
-  }
-
-  // Timer work package search (same functionality)
-  const timerSearchInput = document.getElementById('timerWorkPackageSearch');
-  const timerSelectElement = document.getElementById('timerWorkPackage');
-
-  if (timerSearchInput && timerSelectElement) {
-    timerSearchInput.addEventListener('focus', () => {
-      timerSelectElement.classList.add('show');
-      adjustSelectHeight(timerSelectElement);
-    });
-
-    const debouncedTimerFilter = debounce((query) => {
-      filterTimerWorkPackageOptions(query);
-    }, 300);
-
-    timerSearchInput.addEventListener('input', (e) => {
-      debouncedTimerFilter(e.target.value);
-      timerSelectElement.classList.add('show');
-      adjustSelectHeight(timerSelectElement);
-    });
-
-    timerSelectElement.addEventListener('change', () => {
-      const selectedOption =
-        timerSelectElement.options[timerSelectElement.selectedIndex];
-      if (selectedOption && selectedOption.value) {
-        timerSearchInput.value = selectedOption.textContent;
-        timerSelectElement.classList.remove('show');
-      }
-    });
-
-    timerSelectElement.addEventListener('click', (e) => {
-      if (e.target.tagName === 'OPTION' && e.target.value) {
-        timerSearchInput.value = e.target.textContent;
-        timerSelectElement.value = e.target.value;
-        timerSelectElement.classList.remove('show');
-      }
-    });
-
-    document.addEventListener('click', (e) => {
-      if (
-        !timerSearchInput.contains(e.target) &&
-        !timerSelectElement.contains(e.target)
-      ) {
-        timerSelectElement.classList.remove('show');
-      }
-    });
-  }
-
-  // Project search (same functionality)
-  const projectSearchInput = document.getElementById('projectSearchInput');
-  const projectSelectElement = document.getElementById('projectSelect');
-
-  if (projectSearchInput && projectSelectElement) {
-    projectSearchInput.addEventListener('focus', () => {
-      projectSelectElement.classList.add('show');
-      adjustSelectHeight(projectSelectElement);
-    });
-
-    projectSearchInput.addEventListener('input', (e) => {
-      filterProjectOptions(e.target.value);
-      projectSelectElement.classList.add('show');
-      adjustSelectHeight(projectSelectElement);
-    });
-
-    projectSelectElement.addEventListener('change', () => {
-      const selectedOption =
-        projectSelectElement.options[projectSelectElement.selectedIndex];
-      if (selectedOption && selectedOption.value) {
-        projectSearchInput.value = selectedOption.textContent;
-        projectSelectElement.classList.remove('show');
-      }
-    });
-
-    projectSelectElement.addEventListener('click', (e) => {
-      if (e.target.tagName === 'OPTION' && e.target.value) {
-        projectSearchInput.value = e.target.textContent;
-        projectSelectElement.value = e.target.value;
-        projectSelectElement.classList.remove('show');
-      }
-    });
-
-    document.addEventListener('click', (e) => {
-      if (
-        !projectSearchInput.contains(e.target) &&
-        !projectSelectElement.contains(e.target)
-      ) {
-        projectSelectElement.classList.remove('show');
-      }
-    });
-  }
+  setupSearchableSelect('projectSearchInput', 'projectSelect', (query) =>
+    filterProjectOptions(query)
+  );
 
   // Time range inputs - auto-calculate hours
   const startTimeInput = document.getElementById('workStartTime');
@@ -475,23 +349,13 @@ async function loadWorkPackages() {
 }
 
 // Filter work package options based on search
-async function filterWorkPackageOptions(query) {
+async function filterWorkPackageOptions(query, updateFn) {
   if (!query) {
-    updateWorkPackageSelects(window.allWorkPackages || []);
+    updateFn(window.allWorkPackages || []);
     return;
   }
   const results = await searchWorkPackagesApi(query);
-  updateWorkPackageSelects(results);
-}
-
-// Filter timer work package options
-async function filterTimerWorkPackageOptions(query) {
-  if (!query) {
-    updateTimerWorkPackageSelect(window.allWorkPackages || []);
-    return;
-  }
-  const results = await searchWorkPackagesApi(query);
-  updateTimerWorkPackageSelect(results);
+  updateFn(results);
 }
 
 // Core API search function for work packages
@@ -1293,6 +1157,17 @@ function resetTimerUI() {
 
   timerSeconds = 0;
   isPaused = false;
+
+  // Reset timer form fields
+  const timerSelect = document.getElementById('timerWorkPackage');
+  if (timerSelect) timerSelect.value = '';
+
+  const timerSearch = document.getElementById('timerWorkPackageSearch');
+  if (timerSearch) timerSearch.value = '';
+
+  const timerComment = document.getElementById('timerComment');
+  if (timerComment) timerComment.value = '';
+
   updateTimerDisplay();
   updateTimerButtons(false, 0, false);
 }
@@ -1718,4 +1593,49 @@ function debounce(func, wait) {
     clearTimeout(timeout);
     timeout = setTimeout(later, wait);
   };
+}
+
+// Unified searchable select setup
+function setupSearchableSelect(inputId, selectId, filterFn) {
+  const input = document.getElementById(inputId);
+  const select = document.getElementById(selectId);
+
+  if (!input || !select) return;
+
+  const debouncedFilter = debounce((query) => {
+    filterFn(query);
+  }, 300);
+
+  input.addEventListener('focus', () => {
+    select.classList.add('show');
+    adjustSelectHeight(select);
+  });
+
+  input.addEventListener('input', (e) => {
+    debouncedFilter(e.target.value);
+    select.classList.add('show');
+    adjustSelectHeight(select);
+  });
+
+  select.addEventListener('change', () => {
+    const option = select.options[select.selectedIndex];
+    if (option && option.value) {
+      input.value = option.textContent;
+      select.classList.remove('show');
+    }
+  });
+
+  select.addEventListener('click', (e) => {
+    if (e.target.tagName === 'OPTION' && e.target.value) {
+      input.value = e.target.textContent;
+      select.value = e.target.value;
+      select.classList.remove('show');
+    }
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!input.contains(e.target) && !select.contains(e.target)) {
+      select.classList.remove('show');
+    }
+  });
 }
