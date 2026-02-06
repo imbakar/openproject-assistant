@@ -7,57 +7,60 @@
   <link rel="stylesheet" href="options.css">
 </head>
 <body>
-  <div class="container">
+  <div class="container" role="main">
     <header>
       <h1>⚙️ OpenProject Assistant Settings</h1>
     </header>
-    
+
     <main>
       <section class="settings-section">
         <h2>🔌 Connection Settings</h2>
         <p class="section-description">Configure your OpenProject server connection</p>
-        
+
         <div class="form-group">
           <label for="serverUrl">
             Server URL
             <span class="required">*</span>
           </label>
-          <input 
-            type="url" 
-            id="serverUrl" 
+          <input
+            type="url"
+            id="serverUrl"
             placeholder="https://your-openproject-instance.com"
             required
+            aria-label="Server URL"
+            aria-describedby="serverUrlDesc"
           />
-          <small>The base URL of your OpenProject installation (without trailing slash)</small>
+          <small id="serverUrlDesc">The base URL of your OpenProject installation (without trailing slash)</small>
         </div>
-        
+
         <div class="form-group">
           <label for="apiKey">
             API Key
             <span class="required">*</span>
           </label>
-          <input 
-            type="password" 
-            id="apiKey" 
+          <input
+            type="password"
+            id="apiKey"
             placeholder="Enter your OpenProject API key"
             required
+            aria-label="API Key"
+            aria-describedby="apiKeyDesc"
           />
-          <small>Generate your API key in OpenProject: My Account → Access tokens</small>
+          <small id="apiKeyDesc">Generate your API key in OpenProject: My Account → Access tokens</small>
           <button type="button" id="toggleApiKey" class="btn-link">Show</button>
         </div>
-        
+
         <div class="connection-test">
-          <button type="button" id="testConnectionBtn" class="btn btn-secondary">
+          <button type="button" id="testConnectionBtn" class="btn btn-secondary" aria-live="polite">
             Test Connection
           </button>
-          <div id="connectionResult"></div>
         </div>
       </section>
-      
+
       <section class="settings-section">
         <h2>🔔 Notification Settings</h2>
         <p class="section-description">Configure reminders and notifications</p>
-        
+
         <div class="form-group checkbox-group">
           <label class="checkbox-label">
             <input type="checkbox" id="enableReminders" />
@@ -65,13 +68,13 @@
           </label>
           <small>Get notified if you haven't logged any work for the day</small>
         </div>
-        
+
         <div class="form-group">
           <label for="reminderTime">Reminder Time</label>
           <input type="time" id="reminderTime" value="17:00" />
           <small>Time to receive daily reminder (local time)</small>
         </div>
-        
+
         <div class="form-group checkbox-group">
           <label class="checkbox-label">
             <input type="checkbox" id="enableCommentNotifications" />
@@ -80,11 +83,11 @@
           <small>Get notified when someone comments on your work packages</small>
         </div>
       </section>
-      
+
       <section class="settings-section">
         <h2>🎨 Appearance</h2>
         <p class="section-description">Customize the extension appearance</p>
-        
+
         <div class="form-group">
           <label for="theme">Theme</label>
           <select id="theme">
@@ -93,7 +96,7 @@
             <option value="auto">Auto (System)</option>
           </select>
         </div>
-        
+
         <div class="form-group">
           <label for="dateFormat">Date Format</label>
           <select id="dateFormat">
@@ -103,24 +106,24 @@
           </select>
         </div>
       </section>
-      
+
       <section class="settings-section">
         <h2>📊 Worklog Settings</h2>
         <p class="section-description">Configure worklog behavior</p>
-        
+
         <div class="form-group">
           <label for="defaultWorklogHours">Default Hours per Day</label>
           <input type="number" id="defaultWorklogHours" min="1" max="24" step="0.5" value="8" />
           <small>Default hours to use for quick worklog entry</small>
         </div>
-        
+
         <div class="form-group checkbox-group">
           <label class="checkbox-label">
             <input type="checkbox" id="autoRoundHours" />
             <span>Auto-round hours to nearest quarter (0.25h)</span>
           </label>
         </div>
-        
+
         <div class="form-group checkbox-group">
           <label class="checkbox-label">
             <input type="checkbox" id="requireComment" />
@@ -128,11 +131,41 @@
           </label>
         </div>
       </section>
-      
+
+      <section class="settings-section">
+        <h2>🤖 Work Package Automation</h2>
+        <p class="section-description">Automate work package updates</p>
+
+        <div class="form-group checkbox-group">
+          <label class="checkbox-label">
+            <input type="checkbox" id="autoChangeStatus" />
+            <span>Auto-change status when logging work</span>
+          </label>
+        </div>
+
+        <div id="statusAutomationOptions">
+          <div class="form-group" id="autoStatusFromGroup">
+            <label for="autoStatusFrom">From Status</label>
+            <select id="autoStatusFrom" aria-label="From status for automation">
+              <!-- Dynamic options -->
+            </select>
+            <small>Only change status if it matches this</small>
+          </div>
+
+          <div class="form-group" id="autoStatusToGroup">
+            <label for="autoStatusTo">To Status</label>
+            <select id="autoStatusTo" aria-label="To status for automation">
+              <!-- Dynamic options -->
+            </select>
+            <small>Status to set after logging work</small>
+          </div>
+        </div>
+      </section>
+
       <section class="settings-section">
         <h2>⏱️ Timer Settings</h2>
         <p class="section-description">Configure time tracking behavior</p>
-        
+
         <div class="form-group checkbox-group">
           <label class="checkbox-label">
             <input type="checkbox" id="enableTimerSound" />
@@ -140,7 +173,7 @@
           </label>
           <small>Sound notification at 1 hour, 2 hours, etc.</small>
         </div>
-        
+
         <div class="form-group checkbox-group">
           <label class="checkbox-label">
             <input type="checkbox" id="pauseTimerOnIdle" />
@@ -149,11 +182,11 @@
           <small>Automatically pause after 5 minutes of inactivity</small>
         </div>
       </section>
-      
+
       <section class="settings-section">
         <h2>📅 Calendar Integration</h2>
         <p class="section-description">Sync with external calendars</p>
-        
+
         <div class="form-group">
           <label for="calendarProvider">Calendar Provider</label>
           <select id="calendarProvider">
@@ -163,7 +196,7 @@
           </select>
           <small>Automatically create worklogs from calendar meetings</small>
         </div>
-        
+
         <div class="form-group checkbox-group">
           <label class="checkbox-label">
             <input type="checkbox" id="autoCreateMeetingWorklogs" />
@@ -171,11 +204,11 @@
           </label>
         </div>
       </section>
-      
+
       <section class="settings-section">
         <h2>🗑️ Data Management</h2>
         <p class="section-description">Manage your extension data</p>
-        
+
         <div class="button-group">
           <button type="button" id="clearCacheBtn" class="btn btn-secondary">
             Clear Cache
@@ -187,28 +220,30 @@
             Import Settings
           </button>
         </div>
-        
+
         <input type="file" id="importFileInput" accept=".json" style="display: none;" />
       </section>
-      
-      <div class="status-message" id="statusMessage"></div>
+
+      <div class="form-actions">
+        <button type="button" id="saveBtn" class="btn btn-primary">Save</button>
+        <button type="button" id="cancelBtn" class="btn btn-secondary">Cancel</button>
+      </div>
+
+      <div id="connectionResult" role="status" aria-live="polite"></div>
     </main>
-    
+
     <footer>
-      <button type="button" id="saveBtn" class="btn btn-primary">Save Settings</button>
-      <button type="button" id="cancelBtn" class="btn btn-secondary">Cancel</button>
-      
-      <div class="footer-info">
+      <div class="footer-left">
         <p>OpenProject Assistant v1.0.0</p>
-        <p>
-          <a href="https://www.openproject.org/docs/api/" target="_blank">API Documentation</a> | 
-          <a href="#" id="aboutLink">About</a> | 
-          <a href="#" id="feedbackLink">Send Feedback</a>
-        </p>
+      </div>
+      <div class="footer-right">
+        <a href="https://www.openproject.org/docs/api/" target="_blank">API Documentation</a>
+        <a href="#" id="aboutLink">About</a>
+        <a href="#" id="feedbackLink">Send Feedback</a>
       </div>
     </footer>
   </div>
-  
+
   <script src="options.js"></script>
 </body>
 </html>

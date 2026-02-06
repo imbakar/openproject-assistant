@@ -1096,6 +1096,9 @@ async function logWork() {
     } else {
       await makeApiCall('/api/v3/time_entries', 'POST', data);
       showStatus('Work logged successfully!', 'success');
+
+      // Automatically move from To-Do to In Progress
+      await checkAndUpdateWorkPackageStatus(workPackageId);
     }
 
     // Clear form
@@ -1900,4 +1903,46 @@ function setupSearchableSelect(inputId, selectId, filterFn) {
       select.classList.remove('show');
     }
   });
+}
+
+// Check and update work package status if automation is enabled
+async function checkAndUpdateWorkPackageStatus(workPackageId) {
+  try {
+    const settings = await chrome.storage.sync.get([
+      'autoChangeStatus',
+      'autoStatusFrom',
+      'autoStatusTo',
+    ]);
+
+    if (!settings.autoChangeStatus) return;
+
+    const fromStatusId = settings.autoStatusFrom || false;
+    const toStatusId = settings.autoStatusTo || false;
+
+    if (!fromStatusId || !toStatusId) return;
+
+    const wp = await makeApiCall(`/api/v3/work_packages/${workPackageId}`);
+
+    // Extract current status ID from href
+    const statusHref = wp._links.status?.href || '';
+    const currentStatusId = statusHref.split('/').pop();
+
+    // Check if current status matches the "From" status setting
+    if (currentStatusId === fromStatusId) {
+      await makeApiCall(`/api/v3/work_packages/${workPackageId}`, 'PATCH', {
+        lockVersion: wp.lockVersion,
+        _links: {
+          status: {
+            href: `/api/v3/statuses/${toStatusId}`,
+          },
+        },
+      });
+      console.log(
+        `Work package #${workPackageId} status automatically updated from ${fromStatusId} to ${toStatusId}`
+      );
+    }
+  } catch (error) {
+    console.error('Error updating work package status:', error);
+    // Don't show status error to user as worklog was already successful
+  }
 }
