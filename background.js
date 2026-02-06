@@ -75,7 +75,7 @@ let timerWorkPackageId = '';
 let timerComment = '';
 
 // Promise to ensure state is loaded before handling messages
-const stateLoaded = new Promise((resolve) => {
+const stateLoaded = new Promise((resolve, reject) => {
   chrome.storage.local.get(
     [
       'timerStartTime',
@@ -86,6 +86,19 @@ const stateLoaded = new Promise((resolve) => {
       'timerComment',
     ],
     (data) => {
+      // Check for chrome.runtime.lastError
+      if (chrome.runtime.lastError) {
+        console.error('Error loading timer state:', chrome.runtime.lastError);
+        // Resolve with defaults to prevent extension from hanging
+        timerStartTime = null;
+        timerAccumulatedMS = 0;
+        timerIsRunning = false;
+        timerWorkPackageId = '';
+        timerComment = '';
+        resolve();
+        return;
+      }
+
       if (data.timerStartTime !== undefined)
         timerStartTime = data.timerStartTime;
 

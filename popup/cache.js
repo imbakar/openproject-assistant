@@ -6,9 +6,7 @@ const CacheDB = {
   version: 1,
   db: null,
 
-  /**
-   * Initialize IndexedDB
-   */
+  // Open or create IndexedDB database and set up object stores
   async init() {
     if (this.db) return this.db;
 
@@ -55,47 +53,70 @@ const CacheDB = {
     });
   },
 
-  /**
-   * Cache data in IndexedDB
-   */
+  // Store data in IndexedDB (clears old data first, uses Promise.all for batch operations)
   async cache(storeName, data, metadata = {}) {
     try {
       await this.init();
       const tx = this.db.transaction(storeName, 'readwrite');
       const store = tx.objectStore(storeName);
 
-      // Clear old data first
-      await store.clear();
+      // Clear old data first and batch operations
+      return new Promise((resolve, reject) => {
+        store.clear().onsuccess = () => {
+          try {
+            // Add new data using Promise.all for better performance
+            if (Array.isArray(data)) {
+              const promises = data.map(item => {
+                return new Promise((res, rej) => {
+                  const request = store.put(item);
+                  request.onsuccess = res;
+                  request.onerror = () => rej(request.error);
+                });
+              });
 
-      // Add new data
-      if (Array.isArray(data)) {
-        for (const item of data) {
-          await store.put(item);
-        }
-      } else {
-        await store.put(data);
-      }
-
-      // Update metadata
-      const metaTx = this.db.transaction('metadata', 'readwrite');
-      const metaStore = metaTx.objectStore('metadata');
-      await metaStore.put({
-        key: `${storeName}_lastUpdate`,
-        timestamp: Date.now(),
-        count: Array.isArray(data) ? data.length : 1,
-        ...metadata
+              Promise.all(promises)
+                .then(() => this.updateMetadata(storeName, data, metadata))
+                .then(() => resolve(true))
+                .catch(reject);
+            } else {
+              const request = store.put(data);
+              request.onsuccess = () => {
+                this.updateMetadata(storeName, data, metadata)
+                  .then(() => resolve(true))
+                  .catch(reject);
+              };
+              request.onerror = () => reject(request.error);
+            }
+          } catch (error) {
+            reject(error);
+          }
+        };
+        store.clear().onerror = () => reject(store.clear().error);
       });
-
-      return true;
     } catch (error) {
       console.error(`Error caching ${storeName}:`, error);
       return false;
     }
   },
 
-  /**
-   * Get cached data
-   */
+  // Store metadata about cached data (timestamp, count, etc.)
+  async updateMetadata(storeName, data, metadata = {}) {
+    const metaTx = this.db.transaction('metadata', 'readwrite');
+    const metaStore = metaTx.objectStore('metadata');
+
+    return new Promise((resolve, reject) => {
+      const request = metaStore.put({
+        key: `${storeName}_lastUpdate`,
+        timestamp: Date.now(),
+        count: Array.isArray(data) ? data.length : 1,
+        ...metadata
+      });
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  },
+
+  // Retrieve all cached data from a store
   async get(storeName) {
     try {
       await this.init();
@@ -113,9 +134,7 @@ const CacheDB = {
     }
   },
 
-  /**
-   * Get single item by ID
-   */
+  // Retrieve a single item from cache by its ID
   async getById(storeName, id) {
     try {
       await this.init();
@@ -133,9 +152,7 @@ const CacheDB = {
     }
   },
 
-  /**
-   * Search cached data
-   */
+  // Search cached data using an index (e.g., find by updatedAt or subject)
   async search(storeName, indexName, query) {
     try {
       await this.init();
@@ -154,9 +171,7 @@ const CacheDB = {
     }
   },
 
-  /**
-   * Get cache metadata
-   */
+  // Retrieve metadata entry (timestamp, count, etc.)
   async getMetadata(key) {
     try {
       await this.init();
@@ -174,9 +189,7 @@ const CacheDB = {
     }
   },
 
-  /**
-   * Check if cache is fresh (less than maxAge milliseconds old)
-   */
+  // Check if cached data is still fresh (not older than maxAge in milliseconds)
   async isCacheFresh(storeName, maxAge = 5 * 60 * 1000) {
     const metadata = await this.getMetadata(`${storeName}_lastUpdate`);
     if (!metadata) return false;
@@ -185,9 +198,7 @@ const CacheDB = {
     return age < maxAge;
   },
 
-  /**
-   * Clear all cached data
-   */
+  // Delete all cached data from all stores
   async clearAll() {
     try {
       await this.init();
@@ -207,9 +218,7 @@ const CacheDB = {
     }
   },
 
-  /**
-   * Get cache statistics
-   */
+  // Get cache statistics (count, last update time, age) for all stores
   async getStats() {
     try {
       await this.init();

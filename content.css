@@ -1,0 +1,185 @@
+/* OpenProject Assistant - Content Script Styles */
+
+/* Quick Log Work Button */
+#op-assistant-quick-log {
+  background: #667eea;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-left: 8px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+#op-assistant-quick-log:hover {
+  background: #5568d3;
+}
+
+/* Quick Log Dialog Overlay */
+#op-assistant-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+}
+
+#op-assistant-overlay > div {
+  background: white;
+  padding: 24px;
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  max-width: 400px;
+  width: 90%;
+}
+
+#op-assistant-overlay h2 {
+  margin-top: 0;
+  color: #2c3e50;
+}
+
+#op-assistant-overlay p {
+  color: #6c757d;
+  font-size: 14px;
+}
+
+#op-assistant-overlay label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 500;
+}
+
+#op-assistant-overlay input,
+#op-assistant-overlay textarea {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #ced4da;
+  border-radius: 4px;
+  box-sizing: border-box;
+}
+
+#op-assistant-overlay button {
+  padding: 10px 20px;
+  background: #667eea;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+#op-assistant-overlay button:hover {
+  background: #5568d3;
+}
+
+#op-assistant-overlay #quick-cancel {
+  background: #6c757d;
+}
+
+#op-assistant-overlay #quick-cancel:hover {
+  background: #5a6268;
+}
+
+#op-assistant-overlay #quick-status {
+  margin-top: 12px;
+  display: none;
+  padding: 12px;
+  border-radius: 4px;
+}
+
+#op-assistant-overlay #quick-status.success {
+  background: #d4edda;
+  color: #155724;
+  border: 1px solid #c3e6cb;
+}
+
+#op-assistant-overlay #quick-status.error {
+  background: #f8d7da;
+  color: #721c24;
+  border: 1px solid #f5c6cb;
+}
+
+/* Timer Widget */
+#op-assistant-timer-widget {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  padding: 16px;
+  z-index: 9999;
+  min-width: 200px;
+  display: none;
+}
+
+#op-assistant-timer-widget strong {
+  color: #2c3e50;
+}
+
+#op-assistant-timer-widget #op-timer-close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 18px;
+}
+
+#op-timer-display {
+  font-size: 24px;
+  font-weight: 700;
+  text-align: center;
+  margin: 12px 0;
+  font-variant-numeric: tabular-nums;
+}
+
+#op-timer-display button {
+  flex: 1;
+  padding: 8px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  color: white;
+}
+
+#op-timer-display #op-timer-start {
+  background: #28a745;
+}
+
+#op-timer-display #op-timer-stop {
+  background: #dc3545;
+}
+
+#op-timer-display button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Show Timer Button */
+#op-assistant-show-timer {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  background: #667eea;
+  color: white;
+  border: none;
+  border-radius: 50%;
+  width: 50px;
+  height: 50px;
+  font-size: 24px;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 9998;
+}
+
+#op-assistant-show-timer:hover {
+  background: #5568d3;
+}

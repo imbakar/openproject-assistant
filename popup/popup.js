@@ -1,14 +1,20 @@
-// OpenProject Assistant - Popup Script (OPTIMIZED)
-
-let timerInterval = null;
-let timerSeconds = 0;
-let isPaused = false;
+// OpenProject Assistant - Popup Script
+// Main popup interface for:
+// - Work package search and selection
+// - Time tracking with integrated timer
+// - Worklog creation and editing
+// - Report generation
+// - Task management
 
 // ============================================================================
-// OPTIMIZATION UTILITIES
+// GLOBAL STATE
 // ============================================================================
+// Timer state
+let timerInterval = null; // setInterval ID for timer updates
+let timerSeconds = 0; // Current timer value in seconds
+let isPaused = false; // Timer paused state
 
-// Lazy loading tracker
+// Tab loading state - track which tabs have been loaded to avoid redundant API calls
 window.tabsLoaded = {
   worklog: false,
   timer: false,
@@ -16,14 +22,97 @@ window.tabsLoaded = {
   reports: false,
 };
 
-// Search cache for performance
+// Data cache - store API responses to reduce redundant calls
+window.allWorkPackages = []; // Cached work packages
+window.allProjects = []; // Cached projects
+window.projectsLoaded = false; // Projects loaded flag
+
+// Editing state - track which worklog is being modified
+window.editingWorklogId = null; // ID of worklog being edited
+window.editingWorklogWPId = null; // Work package ID of edited worklog
+
+// ============================================================================
+// CONSTANTS (Named values for easy maintenance)
+// ============================================================================
+const SEARCH_DEBOUNCE_MS = 300; // Delay before search executes (ms)
+const CACHE_MAX_SIZE = 100; // Max cached search results
+const CACHE_MAX_AGE_MS = 5 * 60 * 1000; // Cache expires after 5 minutes
+const SETTINGS_CACHE_TTL_MS = 60 * 1000; // Settings cache expires after 1 minute
+const SELECT_ITEM_HEIGHT_PX = 40; // Height of one select option
+const SELECT_MIN_HEIGHT_PX = 100; // Minimum dropdown height
+const SELECT_MAX_HEIGHT_PX = 180; // Maximum dropdown height
+const STATUS_HIDE_DELAY_MS = 5000; // Status message auto-hide delay
+const TIMER_UPDATE_INTERVAL_MS = 1000; // Timer updates every second
+
+// ============================================================================
+// CACHING
+// ============================================================================
+
+// Search cache with TTL - stores search results and auto-expires after 5 minutes
 const searchCache = {
   workPackages: new Map(),
-  projects: new Map(),
-  maxSize: 100,
+  maxSize: CACHE_MAX_SIZE,
+  maxAge: CACHE_MAX_AGE_MS,
+
+  // Store search result with current timestamp
+  set(key, value) {
+    if (this.workPackages.size >= this.maxSize) {
+      const firstKey = this.workPackages.keys().next().value;
+      this.workPackages.delete(firstKey);
+    }
+    this.workPackages.set(key, { value, timestamp: Date.now() });
+  },
+
+  // Get cached result if exists and not expired
+  get(key) {
+    const entry = this.workPackages.get(key);
+    if (!entry) return null;
+    if (Date.now() - entry.timestamp > this.maxAge) {
+      this.workPackages.delete(key);
+      return null;
+    }
+    return entry.value;
+  },
+
+  // Check if cached result exists and is fresh
+  has(key) {
+    return this.get(key) !== null;
+  },
 };
 
-// Safe async wrapper - prevents crashes
+// Settings cache - reduces chrome.storage.sync calls (which are slow)
+let cachedSettings = {
+  serverUrl: null,
+  apiKey: null,
+  lastFetch: 0,
+  cacheExpiry: SETTINGS_CACHE_TTL_MS,
+};
+
+// ============================================================================
+// SETTINGS CACHE (Simple performance optimization)
+// ============================================================================
+
+// Get cached settings with automatic refresh
+async function getCachedSettings() {
+  const now = Date.now();
+  if (
+    !cachedSettings.serverUrl ||
+    now - cachedSettings.lastFetch > cachedSettings.cacheExpiry
+  ) {
+    const settings = await chrome.storage.sync.get(['serverUrl', 'apiKey']);
+    cachedSettings.serverUrl = settings.serverUrl;
+    cachedSettings.apiKey = settings.apiKey;
+    cachedSettings.lastFetch = now;
+  }
+  return cachedSettings;
+}
+
+// Invalidate settings cache (call after settings update)
+function invalidateSettingsCache() {
+  cachedSettings.lastFetch = 0;
+}
+
+// Safe async wrapper - prevents extension from crashing on errors
 async function safeAsync(fn, errorMsg = 'Operation failed') {
   try {
     return await fn();
@@ -33,15 +122,15 @@ async function safeAsync(fn, errorMsg = 'Operation failed') {
   }
 }
 
-// Initialize popup - OPTIMIZED
+// Initialize popup when DOM is ready
 document.addEventListener('DOMContentLoaded', async () => {
-  // Phase 1: Critical synchronous setup
+  // Phase 1: Critical setup - load settings and set up UI
   await loadSettings();
   await checkConnection();
   setupEventListeners();
   setDefaultDates();
 
-  // Phase 2: Load first tab data in parallel (much faster!)
+  // Phase 2: Load first tab data in parallel (much faster than sequential!)
   const [wpResult, projResult, wlResult] = await Promise.allSettled([
     loadWorkPackages(),
     loadProjects(),
@@ -58,28 +147,28 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   window.tabsLoaded.worklog = true;
 
-  // Phase 3: Preload timer state (low priority, don't block)
+  // Phase 3: Preload timer state in background (don't block popup opening)
   setTimeout(() => loadTimerState(), 100);
 });
 
-// Setup event listeners
+// Setup all event listeners for popup interactions
 function setupEventListeners() {
-  // Tab switching
+  // Tab switching between Worklog, Timer, Reports, Tasks
   document.querySelectorAll('.tab-btn').forEach((btn) => {
     btn.addEventListener('click', () => switchTab(btn.dataset.tab));
   });
 
-  // Settings button
+  // Settings button - opens options page
   document.getElementById('settingsBtn').addEventListener('click', () => {
     chrome.runtime.openOptionsPage();
   });
 
-  // Refresh button - OPTIMIZED with parallel loading
+  // Refresh button - reloads all data in parallel for speed
   document.getElementById('refreshBtn').addEventListener('click', async () => {
     const btn = document.getElementById('refreshBtn');
     Utils.setLoading(btn, true, '🔄');
 
-    // Load all in parallel instead of sequential
+    // Load all data in parallel instead of one by one
     await Promise.allSettled([
       loadWorkPackages(),
       loadProjects(),
@@ -91,13 +180,13 @@ function setupEventListeners() {
     showStatus('Data refreshed', 'success');
   });
 
-  // Setup all searchable selects - OPTIMIZED with debouncing
+  // Setup searchable select dropdowns with debounced search
   setupSearchableSelect(
     'workPackageSearchInput',
     'workPackageSelect',
     Utils.debounce(
       (query) => filterWorkPackageOptions(query, updateWorkPackageSelects),
-      300
+      SEARCH_DEBOUNCE_MS
     )
   );
 
@@ -106,14 +195,14 @@ function setupEventListeners() {
     'timerWorkPackage',
     Utils.debounce(
       (query) => filterWorkPackageOptions(query, updateTimerWorkPackageSelect),
-      300
+      SEARCH_DEBOUNCE_MS
     )
   );
 
   setupSearchableSelect(
     'projectSearchInput',
     'projectSelect',
-    Utils.debounce((query) => filterProjectOptions(query), 300)
+    Utils.debounce((query) => filterProjectOptions(query), SEARCH_DEBOUNCE_MS)
   );
 
   // Time range inputs - auto-calculate hours
@@ -198,7 +287,7 @@ function setupEventListeners() {
   setupKeyboardShortcuts();
 }
 
-// Keyboard shortcuts
+// Setup keyboard shortcuts for power users (Ctrl+K, Ctrl+Enter, Ctrl+1-4)
 function setupKeyboardShortcuts() {
   document.addEventListener('keydown', (e) => {
     // Ctrl/Cmd + K: Focus work package search
@@ -233,7 +322,7 @@ function setupKeyboardShortcuts() {
   });
 }
 
-// Switch tabs
+// Switch to the specified tab and lazy-load data if needed
 function switchTab(tabName) {
   document.querySelectorAll('.tab-btn').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.tab === tabName);
@@ -261,7 +350,7 @@ function switchTab(tabName) {
   }
 }
 
-// Set default dates
+// Set default date values for forms (today for worklog, last 7 days for reports)
 function setDefaultDates() {
   const today = new Date().toISOString().split('T')[0];
   document.getElementById('workDate').value = today;
@@ -274,14 +363,22 @@ function setDefaultDates() {
     .split('T')[0];
 }
 
-// Load settings
+// Load settings from chrome storage (uses cached settings for performance)
 async function loadSettings() {
-  const settings = await chrome.storage.sync.get(['serverUrl', 'apiKey']);
+  const settings = await getCachedSettings();
   return settings;
 }
 
 // Check connection to OpenProject
 async function checkConnection() {
+  const settings = await getCachedSettings();
+
+  // Check if settings are configured
+  if (!settings.serverUrl || !settings.apiKey) {
+    console.log('Extension not configured yet');
+    return false;
+  }
+
   const { lastConnectionCheck } = await chrome.storage.local.get([
     'lastConnectionCheck',
   ]);
@@ -291,9 +388,6 @@ async function checkConnection() {
 
   // If we have a successful connection check from the last hour, use it
   if (lastConnectionCheck && now - lastConnectionCheck < oneHour) {
-    // showStatus('Connected to OpenProject', 'success');
-    const statusEl = document.getElementById('connectionStatusWorklog');
-    statusEl.style.display = 'none';
     return true;
   }
 
@@ -303,12 +397,10 @@ async function checkConnection() {
       await chrome.storage.local.set({
         lastConnectionCheck: now,
       });
-      showStatus('Connected to OpenProject', 'success');
       return true;
     }
   } catch (error) {
-    // If connection fails, we don't store anything so it will retry next time
-    showStatus('Not connected. Please configure settings.', 'error');
+    console.error('Connection check failed:', error);
     return false;
   }
 }
@@ -321,13 +413,23 @@ function showStatus(message, type = 'info') {
   const statusEl = activeTab.querySelector('.status-indicator');
   if (!statusEl) return;
 
-  statusEl.textContent = message;
+  // Handle error objects simply
+  let displayMessage = message;
+  if (message instanceof Error) {
+    displayMessage = message.message;
+    type = type === 'info' ? 'error' : type;
+  } else if (typeof message === 'object' && message?.error) {
+    displayMessage = message.error.message || message.error;
+    type = type === 'info' ? 'error' : type;
+  }
+
+  statusEl.textContent = displayMessage;
   statusEl.className = `status-indicator ${type}`;
   statusEl.style.display = 'block';
 
   setTimeout(() => {
     statusEl.style.display = 'none';
-  }, 5000);
+  }, STATUS_HIDE_DELAY_MS);
 }
 
 // Make API call through background script
@@ -346,7 +448,7 @@ async function makeApiCall(endpoint, method = 'GET', data = null) {
   });
 }
 
-// Switch between selecting existing work packages and creating new ones
+// Toggle between "Select Existing" and "Create New" work package modes in the form
 function switchWorkPackageMode(mode) {
   const existingBtn = document.getElementById('existingModeBtn');
   const newBtn = document.getElementById('newModBtn');
@@ -370,7 +472,7 @@ function switchWorkPackageMode(mode) {
   resetWorklogForm();
 }
 
-// Load projects for project selector
+// Load all projects from OpenProject API for the project selector dropdown
 async function loadProjects() {
   try {
     const response = await makeApiCall('/api/v3/projects?pageSize=100');
@@ -389,7 +491,7 @@ async function loadProjects() {
   }
 }
 
-// Update project select dropdown
+// Render projects in the dropdown select and restore previous selection
 function updateProjectSelect(projects) {
   const projectSelect = document.getElementById('projectSelect');
   const currentValue = projectSelect.value;
@@ -410,7 +512,7 @@ function updateProjectSelect(projects) {
   adjustSelectHeight(projectSelect, 100, 100);
 }
 
-// Filter project options based on search
+// Filter projects list by search query (matches ID or name)
 function filterProjectOptions(query) {
   if (!window.allProjects) return;
 
@@ -427,7 +529,7 @@ function filterProjectOptions(query) {
   updateProjectSelect(filtered);
 }
 
-// Load work package types
+// Load all work package types (Task, Bug, Feature, etc.) from OpenProject
 async function loadWorkPackageTypes() {
   try {
     const response = await makeApiCall('/api/v3/types?pageSize=100');
@@ -451,16 +553,25 @@ async function loadWorkPackageTypes() {
 async function loadWorkPackages() {
   const select = document.getElementById('workPackageSelect');
 
-  // OPTIMIZATION: Show loading state
+  // Check if configured first
+  const settings = await getCachedSettings();
+  if (!settings.serverUrl || !settings.apiKey) {
+    if (select) {
+      select.innerHTML = '<option value="">Configure settings first</option>';
+    }
+    return;
+  }
+
+  // Show loading state
   Utils.setLoading(select, true, 'Loading...');
 
   try {
-    // OPTIMIZATION: Try cache first (offline support)
+    // Try cache first (offline support)
     if (typeof CacheDB !== 'undefined') {
       const isCacheFresh = await CacheDB.isCacheFresh(
         'workPackages',
-        5 * 60 * 1000
-      ); // 5 min
+        CACHE_MAX_AGE_MS
+      );
       if (isCacheFresh) {
         const cachedData = await CacheDB.get('workPackages');
         if (cachedData && cachedData.length > 0) {
@@ -480,7 +591,7 @@ async function loadWorkPackages() {
   } catch (error) {
     console.error('Error loading work packages:', error);
 
-    // OPTIMIZATION: Fallback to cached data on error
+    // Fallback to cached data on error
     if (typeof CacheDB !== 'undefined') {
       const cachedData = await CacheDB.get('workPackages');
       if (cachedData && cachedData.length > 0) {
@@ -492,17 +603,17 @@ async function loadWorkPackages() {
       }
     }
 
-    showStatus('Failed to load work packages', 'error');
+    showStatus('Failed to load work packages: ' + error.message, 'error');
     if (select) {
       select.innerHTML =
-        '<option value="">Failed to load - Please refresh</option>';
+        '<option value="">Failed to load - Check settings</option>';
     }
   } finally {
     Utils.setLoading(select, false);
   }
 }
 
-// Helper function to load fresh data from API
+// Fetch fresh work package data from API (bypasses cache)
 async function loadWorkPackagesFresh() {
   const response = await makeApiCall(
     '/api/v3/work_packages?filters=[{"status_id":{"operator":"o"}}]&pageSize=50&sortBy=[["updated_at","desc"]]'
@@ -528,26 +639,23 @@ async function filterWorkPackageOptions(query, updateFn) {
     return;
   }
 
-  // OPTIMIZATION: Check cache first
+  // OPTIMIZATION: Check cache first (with TTL)
   const cacheKey = `wp_${query.toLowerCase()}`;
-  if (searchCache.workPackages.has(cacheKey)) {
-    updateFn(searchCache.workPackages.get(cacheKey));
+  const cached = searchCache.get(cacheKey);
+  if (cached) {
+    updateFn(cached);
     return;
   }
 
   const results = await searchWorkPackagesApi(query);
 
-  // OPTIMIZATION: Cache results (limit cache size)
-  if (searchCache.workPackages.size >= searchCache.maxSize) {
-    const firstKey = searchCache.workPackages.keys().next().value;
-    searchCache.workPackages.delete(firstKey);
-  }
-  searchCache.workPackages.set(cacheKey, results);
+  // OPTIMIZATION: Cache results with timestamp (auto-evicted by TTL)
+  searchCache.set(cacheKey, results);
 
   updateFn(results);
 }
 
-// Core API search function for work packages
+// Search OpenProject API for work packages matching the query
 async function searchWorkPackagesApi(query, pageSize = 50) {
   try {
     const filter = `[{"subjectOrId":{"operator":"**","values":["${query}"]}},{"status_id":{"operator":"o"}}]`;
@@ -561,8 +669,7 @@ async function searchWorkPackagesApi(query, pageSize = 50) {
   }
 }
 
-// Update timer work package select
-// Update timer work package select
+// Update timer work package select dropdown with work packages
 function updateTimerWorkPackageSelect(workPackages) {
   const select = document.getElementById('timerWorkPackage');
   if (select) {
@@ -570,7 +677,7 @@ function updateTimerWorkPackageSelect(workPackages) {
   }
 }
 
-// Common rendering logic for work package select elements
+// Render work packages as options in a select element (handles empty state)
 function renderWorkPackageOptions(select, workPackages) {
   const currentValue = select.value;
   select.innerHTML = '';
@@ -599,18 +706,20 @@ function renderWorkPackageOptions(select, workPackages) {
   adjustSelectHeight(select);
 }
 
-// Adjust select height dynamically based on number of options
-function adjustSelectHeight(selectElement, minHeight = 100, maxHeight = 180) {
+// Calculate and set select dropdown height based on number of options (min/max bounds)
+function adjustSelectHeight(selectElement, minHeight, maxHeight) {
   const optionCount = selectElement.options.length;
-  const itemHeight = 40; // Approximate height per option
+  const itemHeight = SELECT_ITEM_HEIGHT_PX;
+  const minH = minHeight ?? SELECT_MIN_HEIGHT_PX;
+  const maxH = maxHeight ?? SELECT_MAX_HEIGHT_PX;
 
   let calculatedHeight = optionCount * itemHeight;
-  calculatedHeight = Math.max(minHeight, Math.min(maxHeight, calculatedHeight));
+  calculatedHeight = Math.max(minH, Math.min(maxH, calculatedHeight));
 
   selectElement.style.height = `${calculatedHeight}px`;
 }
 
-// Update work package select dropdowns
+// Update all work package select elements with the provided list
 function updateWorkPackageSelects(workPackages) {
   const selectElements = [
     document.getElementById('workPackageSelect'),
@@ -637,8 +746,16 @@ function updateWorkPackageSelects(workPackages) {
 async function loadRecentWorklogs() {
   const container = document.getElementById('recentWorklogsContainer');
 
+  // Check if configured first
+  const settings = await getCachedSettings();
+  if (!settings.serverUrl || !settings.apiKey) {
+    container.innerHTML =
+      '<p class="empty-state">Please configure your OpenProject connection in settings first.</p>';
+    showStatus('Please configure settings', 'warning');
+    return;
+  }
+
   try {
-    const settings = await chrome.storage.sync.get(['serverUrl']);
     const endDate = new Date().toISOString().split('T')[0];
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - 7);
@@ -739,11 +856,12 @@ async function loadRecentWorklogs() {
     });
   } catch (error) {
     console.error('Error loading worklogs:', error);
-    container.innerHTML = '<p class="empty-state">Failed to load worklogs</p>';
+    const errorMsg = error.message || 'Unknown error';
+    container.innerHTML = `<p class="empty-state">Failed to load worklogs: ${errorMsg}<br><small>Check console for details</small></p>`;
   }
 }
 
-// Edit worklog
+// Load an existing worklog into the form for editing (switches to edit mode)
 function editWorklog(worklogItem) {
   // Switch to existing mode (cannot create new when editing)
   switchWorkPackageMode('existing');
@@ -816,7 +934,7 @@ function editWorklog(worklogItem) {
   showStatus('Editing worklog - modify and click "Update Work"', 'info');
 }
 
-// Delete worklog
+// Delete a worklog entry from OpenProject after user confirmation
 async function deleteWorklog(id) {
   if (!confirm('Are you sure you want to delete this worklog entry?')) {
     return;
@@ -1171,7 +1289,7 @@ function startTimerForWP(wpId, wpTitle) {
   });
 }
 
-// Timer functions
+// Start the timer for tracking work on a work package
 function startTimer() {
   const wpId = document.getElementById('timerWorkPackage').value;
   const comment = document.getElementById('timerComment').value;
@@ -1183,18 +1301,33 @@ function startTimer() {
   chrome.runtime.sendMessage(
     { action: 'startTimer', workPackageId: wpId, comment: comment },
     (response) => {
+      console.log('Start timer response:', response);
+      if (chrome.runtime.lastError) {
+        console.error('Runtime error:', chrome.runtime.lastError);
+        showStatus('Error: ' + chrome.runtime.lastError.message, 'error');
+        return;
+      }
       if (response && response.success) {
         if (!timerInterval) {
-          timerInterval = setInterval(refreshTimerFromBackground, 1000);
+          timerInterval = setInterval(
+            refreshTimerFromBackground,
+            TIMER_UPDATE_INTERVAL_MS
+          );
+          console.log('Timer interval started');
         }
         isPaused = false;
         // Refresh immediately to get the current state and update buttons
         refreshTimerFromBackground();
+        showStatus('Timer started', 'success');
+      } else {
+        console.error('Failed to start timer, response:', response);
+        showStatus('Failed to start timer', 'error');
       }
     }
   );
 }
 
+// Pause or resume the timer based on current state
 function pauseTimer() {
   const action = isPaused ? 'startTimer' : 'pauseTimer';
   const wpId = document.getElementById('timerWorkPackage').value;
@@ -1212,6 +1345,7 @@ function pauseTimer() {
   );
 }
 
+// Request current timer state from background script and update UI
 function refreshTimerFromBackground() {
   chrome.runtime.sendMessage({ action: 'getTimerState' }, (state) => {
     if (!state) return;
@@ -1225,6 +1359,7 @@ function refreshTimerFromBackground() {
   });
 }
 
+// Stop the timer and pre-fill the worklog form with the tracked time
 function stopTimer() {
   chrome.runtime.sendMessage({ action: 'getTimerState' }, (state) => {
     const seconds = state.seconds;
@@ -1290,12 +1425,14 @@ function stopTimer() {
   });
 }
 
+// Reset timer to zero and clear timer form fields
 function resetTimer() {
   chrome.runtime.sendMessage({ action: 'resetTimer' }, () => {
     resetTimerUI();
   });
 }
 
+// Clear timer display and reset all timer-related UI elements
 function resetTimerUI() {
   if (timerInterval) {
     clearInterval(timerInterval);
@@ -1306,32 +1443,35 @@ function resetTimerUI() {
   isPaused = false;
 
   // Reset timer form fields
-  const timerSelect = document.getElementById('timerWorkPackage');
-  if (timerSelect) timerSelect.value = '';
-
-  const timerSearch = document.getElementById('timerWorkPackageSearch');
-  if (timerSearch) timerSearch.value = '';
-
-  const timerComment = document.getElementById('timerComment');
-  if (timerComment) timerComment.value = '';
+  document.getElementById('timerWorkPackage').value = '';
+  document.getElementById('timerWorkPackageSearch').value = '';
+  document.getElementById('timerComment').value = '';
 
   updateTimerDisplay();
   updateTimerButtons(false, 0, false);
 }
 
+// Format and display current timer value as HH:MM:SS
 function updateTimerDisplay() {
   const hours = Math.floor(timerSeconds / 3600);
   const minutes = Math.floor((timerSeconds % 3600) / 60);
   const seconds = timerSeconds % 60;
 
   const display = `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
-  document.getElementById('timerTime').textContent = display;
+  const timerDisplay = document.getElementById('timerTime');
+  if (timerDisplay) {
+    timerDisplay.textContent = display;
+  } else {
+    console.error('Timer display element not found!');
+  }
 }
 
+// Pad single-digit numbers with leading zero for time display
 function pad(num) {
   return num.toString().padStart(2, '0');
 }
 
+// Save current timer work package and comment to background storage
 function saveTimerState() {
   const wpId = document.getElementById('timerWorkPackage').value;
   const comment = document.getElementById('timerComment').value;
@@ -1343,6 +1483,7 @@ function saveTimerState() {
   });
 }
 
+// Load timer state from background script and sync UI
 function loadTimerState() {
   chrome.runtime.sendMessage({ action: 'getTimerState' }, (state) => {
     timerSeconds = state.seconds || 0;
@@ -1357,7 +1498,10 @@ function loadTimerState() {
     }
 
     if (state.isRunning && !timerInterval) {
-      timerInterval = setInterval(refreshTimerFromBackground, 1000);
+      timerInterval = setInterval(
+        refreshTimerFromBackground,
+        TIMER_UPDATE_INTERVAL_MS
+      );
     }
 
     if (state.workPackageId) {
@@ -1375,6 +1519,7 @@ function loadTimerState() {
   });
 }
 
+// Sync timer work package selection with search input display
 function syncTimerWPSelection(wpId) {
   const select = document.getElementById('timerWorkPackage');
   if (!select) return;
@@ -1389,7 +1534,7 @@ function syncTimerWPSelection(wpId) {
   }
 }
 
-// Update visibility and state of timer control buttons
+// Show/hide timer control buttons based on timer state (running, paused, or idle)
 function updateTimerButtons(isRunning, seconds, isPausedState) {
   const startBtn = document.getElementById('startTimerBtn');
   const pauseBtn = document.getElementById('pauseTimerBtn');
@@ -1424,7 +1569,7 @@ function updateTimerButtons(isRunning, seconds, isPausedState) {
   }
 }
 
-// Load tasks
+// Load assigned tasks from OpenProject with optional status and project filters
 async function loadTasks() {
   const container = document.getElementById('tasksList');
   const statusFilter = document.getElementById('taskStatusFilter').value;
@@ -1483,7 +1628,7 @@ async function loadTasks() {
       return;
     }
 
-    const settings = await chrome.storage.sync.get(['serverUrl']);
+    const settings = await getCachedSettings();
 
     const tasksHtml = tasks
       .map((task) => {
@@ -1536,7 +1681,7 @@ async function loadTasks() {
   }
 }
 
-// Load projects for filter dropdown
+// Extract unique projects from tasks and populate the project filter dropdown
 async function loadProjectsForFilter(tasks) {
   try {
     const projectFilter = document.getElementById('taskProjectFilter');
@@ -1564,7 +1709,7 @@ async function loadProjectsForFilter(tasks) {
   }
 }
 
-// Generate report
+// Generate report based on selected type and date range
 async function generateReport() {
   const reportType = document.getElementById('reportType').value;
   const startDate = document.getElementById('reportStartDate').value;
@@ -1590,7 +1735,7 @@ async function generateReport() {
   }
 }
 
-// Display report
+// Render report entries as HTML table based on report type
 function displayReport(entries, reportType) {
   const reportResults = document.getElementById('reportResults');
   const reportContent = document.getElementById('reportContent');
@@ -1602,7 +1747,7 @@ function displayReport(entries, reportType) {
       html +=
         '<th>Date</th><th>Work Package</th><th>Hours</th><th>Comment</th></tr></thead><tbody>';
       entries.forEach((entry) => {
-        const hours = convertISO8601ToHours(entry.hours);
+        const hours = Utils.convertFromISO8601(entry.hours);
         html += `
           <tr>
             <td>${new Date(entry.spentOn).toLocaleDateString()}</td>
@@ -1683,7 +1828,7 @@ function displayReport(entries, reportType) {
   reportResults.style.display = 'block';
 }
 
-// Export report to CSV
+// Export current report table to CSV file for download
 function exportReport() {
   const table = document.querySelector('.report-table');
   if (!table) return;
@@ -1712,7 +1857,7 @@ function exportReport() {
   showStatus('Report exported successfully', 'success');
 }
 
-// Unified searchable select setup
+// Setup a searchable select dropdown with input field (combobox behavior)
 function setupSearchableSelect(inputId, selectId, filterFn) {
   const input = document.getElementById(inputId);
   const select = document.getElementById(selectId);

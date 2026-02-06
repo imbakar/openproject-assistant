@@ -1,9 +1,7 @@
 // OpenProject Assistant - Utility Functions
 
 const Utils = {
-  /**
-   * Escape HTML to prevent XSS
-   */
+  // Escape HTML special characters to prevent XSS attacks
   escapeHtml(text) {
     if (!text) return '';
     const div = document.createElement('div');
@@ -11,9 +9,7 @@ const Utils = {
     return div.innerHTML;
   },
 
-  /**
-   * Format hours as "Xh Ym" format
-   */
+  // Format decimal hours as human-readable string (e.g., 1.5 → "1h 30m")
   formatHours(hours) {
     const h = Math.floor(hours);
     const m = Math.round((hours - h) * 60);
@@ -23,9 +19,7 @@ const Utils = {
     return `${h}h ${m}m`;
   },
 
-  /**
-   * Convert decimal hours to ISO 8601 duration format
-   */
+  // Convert decimal hours to ISO 8601 duration format (e.g., 1.5 → "PT1H30M")
   convertToISO8601(hours) {
     const totalMinutes = Math.round(hours * 60);
     const h = Math.floor(totalMinutes / 60);
@@ -36,9 +30,7 @@ const Utils = {
     return `PT${h}H${m}M`;
   },
 
-  /**
-   * Convert ISO 8601 duration to decimal hours
-   */
+  // Parse ISO 8601 duration format and convert to decimal hours (e.g., "PT1H30M" → 1.5)
   convertFromISO8601(duration) {
     if (!duration) return 0;
 
@@ -51,9 +43,7 @@ const Utils = {
     return hours + minutes / 60;
   },
 
-  /**
-   * Debounce function - delays execution until after wait time
-   */
+  // Debounce: Delay function execution until after wait time expires (prevents excessive calls)
   debounce(func, wait = 300) {
     let timeout;
     return function executedFunction(...args) {
@@ -66,9 +56,7 @@ const Utils = {
     };
   },
 
-  /**
-   * Throttle function - limits execution to once per wait time
-   */
+  // Throttle: Limit function execution to once per wait time (useful for scroll/resize events)
   throttle(func, wait = 300) {
     let inThrottle;
     return function executedFunction(...args) {
@@ -80,9 +68,7 @@ const Utils = {
     };
   },
 
-  /**
-   * Simple cache implementation with size limit
-   */
+  // Create a simple Map-based cache with maximum size limit (evicts oldest when full)
   createCache(maxSize = 100) {
     const cache = new Map();
 
@@ -113,9 +99,7 @@ const Utils = {
     };
   },
 
-  /**
-   * Safe API call wrapper with error handling
-   */
+  // Wrapper for async functions with automatic error handling and logging
   async safeApiCall(apiFunc, errorMessage = 'API call failed') {
     try {
       return await apiFunc();
@@ -125,9 +109,7 @@ const Utils = {
     }
   },
 
-  /**
-   * Format date to locale string
-   */
+  // Safely format date string to locale format, returns original on error
   formatDate(dateString) {
     try {
       return new Date(dateString).toLocaleDateString();
@@ -136,16 +118,12 @@ const Utils = {
     }
   },
 
-  /**
-   * Get work package URL
-   */
+  // Build work package URL from server URL and work package ID
   getWorkPackageUrl(serverUrl, wpId) {
     return wpId ? `${serverUrl}/work_packages/${wpId}` : '#';
   },
 
-  /**
-   * Validate time range
-   */
+  // Validate that end time is after start time, calculate hours if valid
   validateTimeRange(startTime, endTime, date) {
     if (!startTime || !endTime || !date) {
       return { valid: true }; // Optional fields
@@ -168,10 +146,7 @@ const Utils = {
     };
   },
 
-  /**
-   * Extract time from comment if present
-   * Format: (HH:MM - HH:MM) Comment text
-   */
+  // Parse time range from comment format "(HH:MM - HH:MM) Comment text"
   extractTimeFromComment(comment) {
     if (!comment) return null;
 
@@ -189,9 +164,7 @@ const Utils = {
     return null;
   },
 
-  /**
-   * Show loading state on element
-   */
+  // Toggle loading state on button/element (disables and shows loading text)
   setLoading(element, isLoading, loadingText = 'Loading...') {
     if (isLoading) {
       element.disabled = true;
@@ -206,17 +179,13 @@ const Utils = {
     }
   },
 
-  /**
-   * Get status class for work package status
-   */
+  // Convert status text to CSS class name (lowercase with hyphens)
   getStatusClass(status) {
     const statusLower = (status || '').toLowerCase().replace(/\s+/g, '-');
     return statusLower;
   },
 
-  /**
-   * Batch array operations
-   */
+  // Split array into smaller batches for processing
   batch(array, batchSize = 50) {
     const batches = [];
     for (let i = 0; i < array.length; i += batchSize) {
@@ -225,16 +194,12 @@ const Utils = {
     return batches;
   },
 
-  /**
-   * Wait for specified time (useful for testing/rate limiting)
-   */
+  // Async delay for specified milliseconds (useful for testing/rate limiting)
   sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
   },
 
-  /**
-   * Get the ISO week number for a date
-   */
+  // Calculate ISO week number (1-53) for a given date
   getWeekNumber(date) {
     const d = new Date(
       Date.UTC(date.getFullYear(), date.getMonth(), date.getDate())
@@ -245,9 +210,7 @@ const Utils = {
     return Math.ceil(((d - yearStart) / 86400000 + 1) / 7);
   },
 
-  /**
-   * Copy text to clipboard
-   */
+  // Copy text to system clipboard using Navigator Clipboard API
   async copyToClipboard(text) {
     try {
       await navigator.clipboard.writeText(text);
