@@ -124,13 +124,22 @@ async function safeAsync(fn, errorMsg = 'Operation failed') {
 
 // Initialize popup when DOM is ready
 document.addEventListener('DOMContentLoaded', async () => {
-  // Phase 1: Critical setup - load settings and set up UI
+  // Phase 1: Critical setup - load settings, check connection, setup UI
   await loadSettings();
   await checkConnection();
   setupEventListeners();
   setDefaultDates();
 
-  // Phase 2: Load first tab data in parallel (much faster than sequential!)
+  // Phase 2: Check timer and auto-switch IMMEDIATELY if running
+  chrome.runtime.sendMessage({ action: 'getTimerState' }, (state) => {
+    // Auto-switch to timer tab RIGHT AWAY if timer is running
+    if (state.isRunning || state.seconds > 0) {
+      switchTab('timer');
+      loadTimerState();
+    }
+  });
+
+  // Phase 3: Load first tab data in parallel (don't block UI)
   const [wpResult, projResult, wlResult] = await Promise.allSettled([
     loadWorkPackages(),
     loadProjects(),
@@ -146,9 +155,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     console.error('Worklogs failed:', wlResult.reason);
 
   window.tabsLoaded.worklog = true;
-
-  // Phase 3: Preload timer state in background (don't block popup opening)
-  setTimeout(() => loadTimerState(), 100);
 });
 
 // Setup all event listeners for popup interactions
@@ -1494,11 +1500,6 @@ function loadTimerState() {
 
     updateTimerDisplay();
     updateTimerButtons(state.isRunning, timerSeconds, isPaused);
-
-    // If timer is running or active, switch to timer tab
-    if (state.isRunning || timerSeconds > 0) {
-      switchTab('timer');
-    }
 
     if (state.isRunning && !timerInterval) {
       timerInterval = setInterval(
