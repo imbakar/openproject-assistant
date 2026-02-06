@@ -1,20 +1,65 @@
-// OpenProject Assistant - Popup Script
+// OpenProject Assistant - Popup Script (OPTIMIZED)
 
 let timerInterval = null;
 let timerSeconds = 0;
 let isPaused = false;
 
-// Initialize popup
+// ============================================================================
+// OPTIMIZATION UTILITIES
+// ============================================================================
+
+// Lazy loading tracker
+window.tabsLoaded = {
+  worklog: false,
+  timer: false,
+  tasks: false,
+  reports: false,
+};
+
+// Search cache for performance
+const searchCache = {
+  workPackages: new Map(),
+  projects: new Map(),
+  maxSize: 100,
+};
+
+// Safe async wrapper - prevents crashes
+async function safeAsync(fn, errorMsg = 'Operation failed') {
+  try {
+    return await fn();
+  } catch (error) {
+    console.error(errorMsg, error);
+    return null;
+  }
+}
+
+// Initialize popup - OPTIMIZED
 document.addEventListener('DOMContentLoaded', async () => {
+  // Phase 1: Critical synchronous setup
   await loadSettings();
   await checkConnection();
   setupEventListeners();
   setDefaultDates();
-  loadWorkPackages();
-  loadProjects();
-  loadRecentWorklogs();
-  loadTasks();
-  loadTimerState();
+
+  // Phase 2: Load first tab data in parallel (much faster!)
+  const [wpResult, projResult, wlResult] = await Promise.allSettled([
+    loadWorkPackages(),
+    loadProjects(),
+    loadRecentWorklogs(),
+  ]);
+
+  // Log any errors but don't crash
+  if (wpResult.status === 'rejected')
+    console.error('Work packages failed:', wpResult.reason);
+  if (projResult.status === 'rejected')
+    console.error('Projects failed:', projResult.reason);
+  if (wlResult.status === 'rejected')
+    console.error('Worklogs failed:', wlResult.reason);
+
+  window.tabsLoaded.worklog = true;
+
+  // Phase 3: Preload timer state (low priority, don't block)
+  setTimeout(() => loadTimerState(), 100);
 });
 
 // Setup event listeners
@@ -29,28 +74,46 @@ function setupEventListeners() {
     chrome.runtime.openOptionsPage();
   });
 
-  // Refresh button
+  // Refresh button - OPTIMIZED with parallel loading
   document.getElementById('refreshBtn').addEventListener('click', async () => {
-    await loadWorkPackages();
-    await loadProjects();
-    await loadRecentWorklogs();
-    await loadTasks();
+    const btn = document.getElementById('refreshBtn');
+    Utils.setLoading(btn, true, '🔄');
+
+    // Load all in parallel instead of sequential
+    await Promise.allSettled([
+      loadWorkPackages(),
+      loadProjects(),
+      loadRecentWorklogs(),
+      loadTasks(),
+    ]);
+
+    Utils.setLoading(btn, false);
     showStatus('Data refreshed', 'success');
   });
 
-  // Setup all searchable selects
+  // Setup all searchable selects - OPTIMIZED with debouncing
   setupSearchableSelect(
     'workPackageSearchInput',
     'workPackageSelect',
-    (query) => filterWorkPackageOptions(query, updateWorkPackageSelects)
+    Utils.debounce(
+      (query) => filterWorkPackageOptions(query, updateWorkPackageSelects),
+      300
+    )
   );
 
-  setupSearchableSelect('timerWorkPackageSearch', 'timerWorkPackage', (query) =>
-    filterWorkPackageOptions(query, updateTimerWorkPackageSelect)
+  setupSearchableSelect(
+    'timerWorkPackageSearch',
+    'timerWorkPackage',
+    Utils.debounce(
+      (query) => filterWorkPackageOptions(query, updateTimerWorkPackageSelect),
+      300
+    )
   );
 
-  setupSearchableSelect('projectSearchInput', 'projectSelect', (query) =>
-    filterProjectOptions(query)
+  setupSearchableSelect(
+    'projectSearchInput',
+    'projectSelect',
+    Utils.debounce((query) => filterProjectOptions(query), 300)
   );
 
   // Time range inputs - auto-calculate hours
@@ -130,6 +193,44 @@ function setupEventListeners() {
   document
     .getElementById('timerComment')
     .addEventListener('input', saveTimerState);
+
+  // OPTIMIZATION: Add keyboard shortcuts for power users
+  setupKeyboardShortcuts();
+}
+
+// Keyboard shortcuts
+function setupKeyboardShortcuts() {
+  document.addEventListener('keydown', (e) => {
+    // Ctrl/Cmd + K: Focus work package search
+    if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+      e.preventDefault();
+      const searchInput = document.getElementById('workPackageSearchInput');
+      if (searchInput) {
+        switchTab('worklog');
+        searchInput.focus();
+      }
+    }
+
+    // Ctrl/Cmd + Enter: Submit current form
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      e.preventDefault();
+      const activeTab = document.querySelector('.tab-content.active');
+      if (activeTab) {
+        if (activeTab.id === 'worklog') {
+          document.getElementById('logWorkBtn')?.click();
+        } else if (activeTab.id === 'reports') {
+          document.getElementById('generateReportBtn')?.click();
+        }
+      }
+    }
+
+    // Ctrl/Cmd + 1-4: Switch tabs
+    if ((e.ctrlKey || e.metaKey) && e.key >= '1' && e.key <= '4') {
+      e.preventDefault();
+      const tabs = ['worklog', 'timer', 'reports', 'tasks'];
+      switchTab(tabs[parseInt(e.key) - 1]);
+    }
+  });
 }
 
 // Switch tabs
@@ -141,6 +242,23 @@ function switchTab(tabName) {
   document.querySelectorAll('.tab-content').forEach((content) => {
     content.classList.toggle('active', content.id === tabName);
   });
+
+  // OPTIMIZATION: Lazy load tabs on first access
+  if (!window.tabsLoaded[tabName]) {
+    window.tabsLoaded[tabName] = true;
+
+    switch (tabName) {
+      case 'timer':
+        loadTimerState();
+        break;
+      case 'tasks':
+        loadTasks();
+        break;
+      case 'reports':
+        // Reports load on-demand when generate button clicked
+        break;
+    }
+  }
 }
 
 // Set default dates
@@ -331,21 +449,76 @@ async function loadWorkPackageTypes() {
 
 // Load work packages
 async function loadWorkPackages() {
+  const select = document.getElementById('workPackageSelect');
+
+  // OPTIMIZATION: Show loading state
+  Utils.setLoading(select, true, 'Loading...');
+
   try {
-    const response = await makeApiCall(
-      '/api/v3/work_packages?filters=[{"status_id":{"operator":"o"}}]&pageSize=50&sortBy=[["updated_at","desc"]]'
-    );
+    // OPTIMIZATION: Try cache first (offline support)
+    if (typeof CacheDB !== 'undefined') {
+      const isCacheFresh = await CacheDB.isCacheFresh(
+        'workPackages',
+        5 * 60 * 1000
+      ); // 5 min
+      if (isCacheFresh) {
+        const cachedData = await CacheDB.get('workPackages');
+        if (cachedData && cachedData.length > 0) {
+          window.allWorkPackages = cachedData;
+          updateWorkPackageSelects(cachedData);
+          Utils.setLoading(select, false);
 
-    let workPackages = response._embedded?.elements || [];
+          // Load fresh data in background
+          loadWorkPackagesFresh().catch(console.error);
+          return;
+        }
+      }
+    }
 
-    // Store globally for filtering
-    window.allWorkPackages = workPackages;
-
-    updateWorkPackageSelects(workPackages);
+    // Load fresh data
+    await loadWorkPackagesFresh();
   } catch (error) {
     console.error('Error loading work packages:', error);
+
+    // OPTIMIZATION: Fallback to cached data on error
+    if (typeof CacheDB !== 'undefined') {
+      const cachedData = await CacheDB.get('workPackages');
+      if (cachedData && cachedData.length > 0) {
+        window.allWorkPackages = cachedData;
+        updateWorkPackageSelects(cachedData);
+        showStatus('Using cached data (offline)', 'warning');
+        Utils.setLoading(select, false);
+        return;
+      }
+    }
+
     showStatus('Failed to load work packages', 'error');
+    if (select) {
+      select.innerHTML =
+        '<option value="">Failed to load - Please refresh</option>';
+    }
+  } finally {
+    Utils.setLoading(select, false);
   }
+}
+
+// Helper function to load fresh data from API
+async function loadWorkPackagesFresh() {
+  const response = await makeApiCall(
+    '/api/v3/work_packages?filters=[{"status_id":{"operator":"o"}}]&pageSize=50&sortBy=[["updated_at","desc"]]'
+  );
+
+  let workPackages = response._embedded?.elements || [];
+
+  // Store globally for filtering
+  window.allWorkPackages = workPackages;
+
+  // OPTIMIZATION: Cache for offline use
+  if (typeof CacheDB !== 'undefined' && workPackages.length > 0) {
+    await CacheDB.cache('workPackages', workPackages);
+  }
+
+  updateWorkPackageSelects(workPackages);
 }
 
 // Filter work package options based on search
@@ -354,7 +527,23 @@ async function filterWorkPackageOptions(query, updateFn) {
     updateFn(window.allWorkPackages || []);
     return;
   }
+
+  // OPTIMIZATION: Check cache first
+  const cacheKey = `wp_${query.toLowerCase()}`;
+  if (searchCache.workPackages.has(cacheKey)) {
+    updateFn(searchCache.workPackages.get(cacheKey));
+    return;
+  }
+
   const results = await searchWorkPackagesApi(query);
+
+  // OPTIMIZATION: Cache results (limit cache size)
+  if (searchCache.workPackages.size >= searchCache.maxSize) {
+    const firstKey = searchCache.workPackages.keys().next().value;
+    searchCache.workPackages.delete(firstKey);
+  }
+  searchCache.workPackages.set(cacheKey, results);
+
   updateFn(results);
 }
 
@@ -470,15 +659,15 @@ async function loadRecentWorklogs() {
 
     container.innerHTML = worklogs
       .map((wl) => {
-        const hours = convertISO8601ToHours(wl.hours);
-        const hoursFormatted = formatHoursAsHHMM(hours);
+        const hours = Utils.convertFromISO8601(wl.hours);
+        const hoursFormatted = Utils.formatHours(hours);
         const wpId = wl._links.workPackage?.href?.split('/').pop() || '';
         const wpTitle = wl._links.workPackage?.title || 'Unknown';
         const wpUrl = wpId
           ? `${settings.serverUrl}/work_packages/${wpId}`
           : '#';
         const commentRaw = wl.comment?.raw || '';
-        let commentEscaped = escapeHtml(commentRaw);
+        let commentEscaped = Utils.escapeHtml(commentRaw);
 
         let startTime = wl.startTime
           ? new Date(wl.startTime).toTimeString().slice(0, 5)
@@ -499,10 +688,10 @@ async function loadRecentWorklogs() {
         }
 
         return `
-        <div class="worklog-item" data-id="${wl.id}" data-wp-id="${wpId}" data-wp-title="${escapeHtml(wpTitle)}" data-date="${wl.spentOn}" data-hours="${hours}" data-comment="${commentEscaped}" data-start-time="${startTime}" data-end-time="${endTime}">
+        <div class="worklog-item" data-id="${wl.id}" data-wp-id="${wpId}" data-wp-title="${Utils.escapeHtml(wpTitle)}" data-date="${wl.spentOn}" data-hours="${hours}" data-comment="${commentEscaped}" data-start-time="${startTime}" data-end-time="${endTime}">
           <div class="worklog-header">
             <a href="${wpUrl}" target="_blank" class="worklog-title" title="Open in OpenProject">
-              #${wpId} - ${escapeHtml(wpTitle)}
+              #${wpId} - ${Utils.escapeHtml(wpTitle)}
             </a>
             <div class="worklog-hours">${hoursFormatted}</div>
           </div>
@@ -551,20 +740,6 @@ async function loadRecentWorklogs() {
   } catch (error) {
     console.error('Error loading worklogs:', error);
     container.innerHTML = '<p class="empty-state">Failed to load worklogs</p>';
-  }
-}
-
-// Format hours as HH:MM (or Xh Ym format)
-function formatHoursAsHHMM(hours) {
-  const h = Math.floor(hours);
-  const m = Math.round((hours - h) * 60);
-
-  if (h === 0) {
-    return `${m}m`;
-  } else if (m === 0) {
-    return `${h}h`;
-  } else {
-    return `${h}h ${m}m`;
   }
 }
 
@@ -756,7 +931,7 @@ async function logWork() {
 
   try {
     // Convert hours to ISO 8601 duration format (PT#H#M)
-    const duration = convertHoursToISO8601(hours);
+    const duration = Utils.convertToISO8601(hours);
 
     // Smart Comment: Prepend times to the comment so they are stored even if API doesn't support the fields
     let finalComment = comment || '';
@@ -852,34 +1027,6 @@ function resetWorklogForm() {
     logBtn.classList.remove('btn-warning');
     logBtn.classList.add('btn-primary');
   }
-}
-
-// Convert hours (decimal) to ISO 8601 duration format
-function convertHoursToISO8601(hours) {
-  const totalMinutes = Math.round(hours * 60);
-  const h = Math.floor(totalMinutes / 60);
-  const m = totalMinutes % 60;
-
-  if (m === 0) {
-    return `PT${h}H`;
-  } else if (h === 0) {
-    return `PT${m}M`;
-  } else {
-    return `PT${h}H${m}M`;
-  }
-}
-
-// Convert ISO 8601 duration to hours (decimal)
-function convertISO8601ToHours(duration) {
-  if (!duration || typeof duration !== 'string') return 0;
-
-  const hoursMatch = duration.match(/(\d+)H/);
-  const minutesMatch = duration.match(/(\d+)M/);
-
-  const hours = hoursMatch ? parseInt(hoursMatch[1]) : 0;
-  const minutes = minutesMatch ? parseInt(minutesMatch[1]) : 0;
-
-  return hours + minutes / 60;
 }
 
 // Helper to pre-fill worklog form for a specific work package
@@ -1345,13 +1492,13 @@ async function loadTasks() {
         const wpUrl = `${settings.serverUrl}/work_packages/${task.id}`;
 
         return `
-        <div class="task-item" data-id="${task.id}" data-title="${escapeHtml(task.subject)}">
+        <div class="task-item" data-id="${task.id}" data-title="${Utils.escapeHtml(task.subject)}">
           <div class="task-header">
             <a href="${wpUrl}" target="_blank" class="task-id">#${task.id}</a>
-            <div class="task-status ${statusClass}">${escapeHtml(status)}</div>
+            <div class="task-status ${statusClass}">${Utils.escapeHtml(status)}</div>
           </div>
-          <div class="task-title">${escapeHtml(task.subject)}</div>
-          <div class="task-project">${escapeHtml(task._links.project?.title || 'Unknown Project')}</div>
+          <div class="task-title">${Utils.escapeHtml(task.subject)}</div>
+          <div class="task-project">${Utils.escapeHtml(task._links.project?.title || 'Unknown Project')}</div>
           <div class="task-actions">
             <button class="task-action-btn log-again" data-action="log-again">
               Log Work
@@ -1461,7 +1608,7 @@ function displayReport(entries, reportType) {
             <td>${new Date(entry.spentOn).toLocaleDateString()}</td>
             <td>#${entry._links.workPackage?.href?.split('/').pop() || 'N/A'}</td>
             <td>${hours.toFixed(2)}</td>
-            <td>${escapeHtml(entry.comment?.raw || '')}</td>
+            <td>${Utils.escapeHtml(entry.comment?.raw || '')}</td>
           </tr>
         `;
       });
@@ -1469,7 +1616,7 @@ function displayReport(entries, reportType) {
 
     case 'user':
       const totalHours = entries.reduce(
-        (sum, e) => sum + convertISO8601ToHours(e.hours),
+        (sum, e) => sum + Utils.convertFromISO8601(e.hours),
         0
       );
       const avgHours = (totalHours / entries.length).toFixed(2);
@@ -1490,7 +1637,7 @@ function displayReport(entries, reportType) {
         if (!projectMap[projectId]) {
           projectMap[projectId] = { title: projectTitle, hours: 0, count: 0 };
         }
-        projectMap[projectId].hours += convertISO8601ToHours(entry.hours);
+        projectMap[projectId].hours += Utils.convertFromISO8601(entry.hours);
         projectMap[projectId].count++;
       });
 
@@ -1499,7 +1646,7 @@ function displayReport(entries, reportType) {
       Object.values(projectMap).forEach((project) => {
         html += `
           <tr>
-            <td>${escapeHtml(project.title)}</td>
+            <td>${Utils.escapeHtml(project.title)}</td>
             <td>${project.count}</td>
             <td>${project.hours.toFixed(2)}</td>
           </tr>
@@ -1510,11 +1657,11 @@ function displayReport(entries, reportType) {
     case 'weekly':
       const weekMap = {};
       entries.forEach((entry) => {
-        const week = getWeekNumber(new Date(entry.spentOn));
+        const week = Utils.getWeekNumber(new Date(entry.spentOn));
         if (!weekMap[week]) {
           weekMap[week] = { hours: 0, count: 0 };
         }
-        weekMap[week].hours += convertISO8601ToHours(entry.hours);
+        weekMap[week].hours += Utils.convertFromISO8601(entry.hours);
         weekMap[week].count++;
       });
 
@@ -1565,36 +1712,6 @@ function exportReport() {
   showStatus('Report exported successfully', 'success');
 }
 
-// Utility functions
-function escapeHtml(text) {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
-}
-
-function getWeekNumber(date) {
-  const d = new Date(
-    Date.UTC(date.getFullYear(), date.getMonth(), date.getDate())
-  );
-  const dayNum = d.getUTCDay() || 7;
-  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
-  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-  return Math.ceil(((d - yearStart) / 86400000 + 1) / 7);
-}
-
-// Utility to debounce function calls
-function debounce(func, wait) {
-  let timeout;
-  return function executedFunction(...args) {
-    const later = () => {
-      clearTimeout(timeout);
-      func(...args);
-    };
-    clearTimeout(timeout);
-    timeout = setTimeout(later, wait);
-  };
-}
-
 // Unified searchable select setup
 function setupSearchableSelect(inputId, selectId, filterFn) {
   const input = document.getElementById(inputId);
@@ -1602,7 +1719,7 @@ function setupSearchableSelect(inputId, selectId, filterFn) {
 
   if (!input || !select) return;
 
-  const debouncedFilter = debounce((query) => {
+  const debouncedFilter = Utils.debounce((query) => {
     filterFn(query);
   }, 300);
 
